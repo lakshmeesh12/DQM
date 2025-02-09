@@ -4,6 +4,7 @@ import io
 import json
 import os
 import numpy as np
+from typing import List, Dict
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -179,3 +180,4 @@ def generate_dq_rules(data: str, column_info: dict, model: str = "gpt-4-turbo"):
             rules[column]['statistics'] = column_stats[column]
     
     return rules
+

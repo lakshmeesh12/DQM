@@ -153,24 +153,18 @@ async def validate_and_correct_data(
     container_name: str,
     file_name: str,
     file: Optional[UploadFile] = File(None),
-    column_selection: str = Form(...)  # Changed from ColumnSelection to str
+    column_selection: str = Form(...)
 ):
     """Process and validate selected columns against DQ rules"""
     logger.debug(f"Validating data from {selected_option}/{container_name}/{file_name}")
     try:
-        # Parse the column_selection JSON string
-        try:
-            column_selection_data = json.loads(column_selection)
-            selected_columns = column_selection_data.get('selected_columns', [])
-            if not selected_columns or not isinstance(selected_columns, list):
-                raise HTTPException(
-                    status_code=400,
-                    detail="Invalid column_selection format. Must include 'selected_columns' list"
-                )
-        except json.JSONDecodeError:
+        # Parse column selection
+        column_selection_data = json.loads(column_selection)
+        selected_columns = column_selection_data.get('selected_columns', [])
+        if not selected_columns or not isinstance(selected_columns, list):
             raise HTTPException(
                 status_code=400,
-                detail="Invalid JSON format for column_selection"
+                detail="Invalid column_selection format. Must include 'selected_columns' list"
             )
 
         # Get file content
@@ -194,37 +188,70 @@ async def validate_and_correct_data(
                 detail="No file content was retrieved"
             )
 
+        # First detect if file has headers
+        has_headers = detect_headers(file_content)
+        
+        # Read the data and handle column names
+        if has_headers:
+            df = pd.read_csv(io.StringIO(file_content))
+            column_mapping = {str(i): col for i, col in enumerate(df.columns)}
+        else:
+            # Get generated column names
+            column_mapping = column_name_gen(file_content)
+            df = pd.read_csv(io.StringIO(file_content), header=None)
+            df.columns = [column_mapping[str(i)] for i in range(len(df.columns))]
+
         # Check if rules exist for selected columns
         for column in selected_columns:
-            rule_path = os.path.join('rules', f'{column}_rules.json')
-            if not os.path.exists(rule_path):
+            # Try both original and generated column names for rules
+            original_rule_path = os.path.join('rules', f'{column}_rules.json')
+            generated_rule_path = None
+            
+            # If using generated names, find the corresponding generated name
+            if not has_headers:
+                # Find the index where the selected column name matches
+                for idx, name in column_mapping.items():
+                    if name == column:
+                        generated_rule_path = os.path.join('rules', f'{name}_rules.json')
+                        break
+            
+            if not os.path.exists(original_rule_path) and (
+                not generated_rule_path or not os.path.exists(generated_rule_path)
+            ):
                 raise HTTPException(
                     status_code=400,
                     detail=f"DQ rules not found for column: {column}. Please generate rules first."
                 )
 
-        # Read the data into a DataFrame
-        df = pd.read_csv(io.StringIO(file_content))
-        
-        # Validate selected columns exist in the dataframe
-        missing_columns = [col for col in selected_columns if col not in df.columns]
-        if missing_columns:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Columns not found in file: {missing_columns}"
-            )
-        
-        # Initialize the data processor
+        # Map selected columns to actual column names in the DataFrame
+        actual_columns = []
+        for col in selected_columns:
+            if col in df.columns:
+                actual_columns.append(col)
+            else:
+                # Try to find the generated column name
+                matching_cols = [name for name in df.columns if name == col]
+                if matching_cols:
+                    actual_columns.append(matching_cols[0])
+                else:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Column not found in file: {col}"
+                    )
+
+        # Initialize the data processor with the column mapping
         processor = DataStreamProcessor(chunk_size=1000)
         
-        # Process the data
+        # Process the data with actual column names
         original_data, corrected_data, modifications = processor.process_data(
             df, 
-            selected_columns
+            actual_columns
         )
         
         return JSONResponse(content={
             "status": "success",
+            "has_headers": has_headers,
+            "column_mapping": column_mapping,
             "original_data": original_data.to_dict(orient='records'),
             "corrected_data": corrected_data.to_dict(orient='records'),
             "modifications": modifications

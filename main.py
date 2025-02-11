@@ -5,10 +5,9 @@ from typing import Optional, List
 from pydantic import BaseModel
 import logging
 import pandas as pd
-import sys
 import io
-import json
 import os
+import json
 from file_manager import (
     list_s3_buckets, list_s3_files, read_s3_file,
     list_azure_containers, list_azure_files, read_azure_file
@@ -141,11 +140,6 @@ async def process_file(
         logger.error(f"Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
-# Update the imports at the top of your main.py to include Form
-from fastapi import FastAPI, UploadFile, File, HTTPException, Form
-from typing import Optional, List
-import json
-
 # Replace the validate-data endpoint with this updated version
 @app.post("/validate-data/{selected_option}/{container_name}/{file_name}")
 async def validate_and_correct_data(
@@ -155,19 +149,14 @@ async def validate_and_correct_data(
     file: Optional[UploadFile] = File(None),
     column_selection: str = Form(...)
 ):
-    """Process and validate selected columns against DQ rules"""
     logger.debug(f"Validating data from {selected_option}/{container_name}/{file_name}")
+    
     try:
-        # Parse column selection
         column_selection_data = json.loads(column_selection)
         selected_columns = column_selection_data.get('selected_columns', [])
         if not selected_columns or not isinstance(selected_columns, list):
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid column_selection format. Must include 'selected_columns' list"
-            )
+            raise HTTPException(status_code=400, detail="Invalid column_selection format")
 
-        # Get file content
         file_content = None
         if selected_option == "aws":
             file_content = read_s3_file(container_name, file_name)
@@ -177,89 +166,35 @@ async def validate_and_correct_data(
             file_content = await file.read()
             file_content = file_content.decode("utf-8")
         else:
-            raise HTTPException(
-                status_code=400,
-                detail="Invalid storage option or missing file"
-            )
+            raise HTTPException(status_code=400, detail="Invalid storage option or missing file")
 
         if not file_content:
-            raise HTTPException(
-                status_code=500,
-                detail="No file content was retrieved"
-            )
+            raise HTTPException(status_code=500, detail="No file content was retrieved")
 
-        # First detect if file has headers
         has_headers = detect_headers(file_content)
         
-        # Read the data and handle column names
-        if has_headers:
-            df = pd.read_csv(io.StringIO(file_content))
-            column_mapping = {str(i): col for i, col in enumerate(df.columns)}
-        else:
-            # Get generated column names
+        df = pd.read_csv(io.StringIO(file_content))
+        if not has_headers:
             column_mapping = column_name_gen(file_content)
-            df = pd.read_csv(io.StringIO(file_content), header=None)
             df.columns = [column_mapping[str(i)] for i in range(len(df.columns))]
+        else:
+            column_mapping = {str(i): col for i, col in enumerate(df.columns)}
 
-        # Check if rules exist for selected columns
-        for column in selected_columns:
-            # Try both original and generated column names for rules
-            original_rule_path = os.path.join('rules', f'{column}_rules.json')
-            generated_rule_path = None
-            
-            # If using generated names, find the corresponding generated name
-            if not has_headers:
-                # Find the index where the selected column name matches
-                for idx, name in column_mapping.items():
-                    if name == column:
-                        generated_rule_path = os.path.join('rules', f'{name}_rules.json')
-                        break
-            
-            if not os.path.exists(original_rule_path) and (
-                not generated_rule_path or not os.path.exists(generated_rule_path)
-            ):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"DQ rules not found for column: {column}. Please generate rules first."
-                )
-
-        # Map selected columns to actual column names in the DataFrame
-        actual_columns = []
-        for col in selected_columns:
-            if col in df.columns:
-                actual_columns.append(col)
-            else:
-                # Try to find the generated column name
-                matching_cols = [name for name in df.columns if name == col]
-                if matching_cols:
-                    actual_columns.append(matching_cols[0])
-                else:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Column not found in file: {col}"
-                    )
-
-        # Initialize the data processor with the column mapping
         processor = DataStreamProcessor(chunk_size=1000)
+        corrected_data, modifications = processor.process_data(df, selected_columns)
         
-        # Process the data with actual column names
-        original_data, corrected_data, modifications = processor.process_data(
-            df, 
-            actual_columns
-        )
-        
-        return JSONResponse(content={
+        return {
             "status": "success",
             "has_headers": has_headers,
             "column_mapping": column_mapping,
-            "original_data": original_data.to_dict(orient='records'),
             "corrected_data": corrected_data.to_dict(orient='records'),
             "modifications": modifications
-        })
+        }
 
     except Exception as e:
         logger.error(f"Error: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+    
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -8,12 +8,17 @@ import pandas as pd
 import io
 import os
 import json
+from fastapi import BackgroundTasks
+from data_process import DataStreamProcessor
+from fastapi.responses import StreamingResponse
+import asyncio
+from sse_starlette.sse import EventSourceResponse
 from file_manager import (
     list_s3_buckets, list_s3_files, read_s3_file,
     list_azure_containers, list_azure_files, read_azure_file
 )
 from llm import column_name_gen, detect_headers, generate_dq_rules
-from data_process import DataStreamProcessor
+# from data_process import DataStreamProcessor
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -180,7 +185,8 @@ async def validate_and_correct_data(
         else:
             column_mapping = {str(i): col for i, col in enumerate(df.columns)}
 
-        processor = DataStreamProcessor(chunk_size=1000)
+        # Initialize DataStreamProcessor without chunk_size parameter
+        processor = DataStreamProcessor()
         corrected_data, modifications = processor.process_data(df, selected_columns)
         
         return {

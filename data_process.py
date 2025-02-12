@@ -13,10 +13,87 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 class DataStreamProcessor:
-    def __init__(self, chunk_size: int = 1000):
-        self.chunk_size = chunk_size
+    def __init__(self):
         load_dotenv()
         self.client = openai.OpenAI(api_key=os.getenv('OPEN_AI_KEY'))
+        self.MAX_TOKENS = 128000  # GPT-4 Turbo token limit
+        self.TARGET_TOKEN_USAGE = 0.5  # Use 50% of token limit
+        self.MIN_CHUNK_SIZE = 100
+        self.MAX_CHUNK_SIZE = 1000
+        
+    def _estimate_tokens_per_row(self, df: pd.DataFrame, selected_columns: List[str]) -> int:
+        """Estimate tokens per row based on data types and content."""
+        # Handle empty dataframe
+        if df.empty or len(selected_columns) == 0:
+            return self.MAX_TOKENS  # Return max tokens to force minimum chunk size
+            
+        total_tokens = 0
+        sample_size = min(100, len(df))
+        
+        # Ensure sample size is at least 1
+        if sample_size < 1:
+            sample_size = 1
+            
+        sample_df = df.head(sample_size)
+        
+        for column in selected_columns:
+            dtype = str(df[column].dtype)
+            sample_values = sample_df[column].astype(str).values
+            
+            # Handle empty sample values
+            if len(sample_values) == 0:
+                continue
+                
+            # Calculate average characters per value with safety check
+            value_lengths = [len(str(v)) for v in sample_values if str(v) != 'nan']
+            avg_chars = np.mean(value_lengths) if value_lengths else 1
+            
+            # Token estimation based on data type
+            if 'object' in dtype or 'string' in dtype:
+                # Text data: roughly 1 token per 4 characters
+                total_tokens += max(1, (avg_chars / 4))
+            elif 'int' in dtype or 'float' in dtype:
+                # Numeric data: roughly 1 token per value
+                total_tokens += 1
+            elif 'datetime' in dtype:
+                # DateTime: roughly 2 tokens per value
+                total_tokens += 2
+            else:
+                # Default estimation
+                total_tokens += max(1, (avg_chars / 4))
+        
+        # Ensure we return at least 1 token per row
+        return max(1, int(total_tokens))
+
+    def _calculate_optimal_chunk_size(self, df: pd.DataFrame, selected_columns: List[str]) -> int:
+        """Calculate optimal chunk size based on data characteristics."""
+        try:
+            tokens_per_row = self._estimate_tokens_per_row(df, selected_columns)
+            column_count = len(selected_columns)
+            
+            # Base chunk size calculation using token limit
+            max_rows_by_tokens = int((self.MAX_TOKENS * self.TARGET_TOKEN_USAGE) / max(1, tokens_per_row))
+            
+            # Adjust based on column count
+            if column_count > 50:
+                max_rows_by_columns = 5000 // max(1, column_count)
+            else:
+                max_rows_by_columns = self.MAX_CHUNK_SIZE
+            
+            # Take the minimum of both constraints
+            optimal_chunk_size = min(max_rows_by_tokens, max_rows_by_columns)
+            
+            # Set minimum and maximum bounds
+            optimal_chunk_size = max(self.MIN_CHUNK_SIZE, min(self.MAX_CHUNK_SIZE, optimal_chunk_size))
+            
+            logger.info(f"Calculated optimal chunk size: {optimal_chunk_size} rows")
+            logger.info(f"Estimated tokens per row: {tokens_per_row}")
+            
+            return optimal_chunk_size
+            
+        except Exception as e:
+            logger.error(f"Error calculating chunk size: {str(e)}")
+            return self.MIN_CHUNK_SIZE
 
     def _process_chunk(self, chunk: pd.DataFrame, columns: List[str]) -> Tuple[pd.DataFrame, List[Dict]]:
         modifications = []
@@ -143,7 +220,11 @@ Return a JSON object strictly following this structure:
         data = data.replace([np.inf, -np.inf], None)
         working_data = data.copy()
         
-        chunks = [working_data[i:i + self.chunk_size] for i in range(0, len(working_data), self.chunk_size)]
+        # Calculate optimal chunk size based on data characteristics
+        chunk_size = self._calculate_optimal_chunk_size(working_data, selected_columns)
+        chunks = [working_data[i:i + chunk_size] for i in range(0, len(working_data), chunk_size)]
+        
+        logger.info(f"Processing {len(chunks)} chunks of size {chunk_size}")
         results = []
         
         with ThreadPoolExecutor() as executor:

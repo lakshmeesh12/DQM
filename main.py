@@ -26,7 +26,7 @@ from file_manager import (
 )
 from llm import column_name_gen, detect_headers, generate_dq_rules, detect_lookup_columns, generate_lookup_tables
 # from data_process import DataStreamProcessor
-
+from llm import validate_lookup_tables
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -83,13 +83,19 @@ async def get_storage_containers(selected_option: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 def convert_numpy_types(obj):
-    """Recursively convert numpy types to native Python types"""
+    """
+    Convert numpy types to Python native types for JSON serialization.
+    """
     if isinstance(obj, dict):
-        return {k: convert_numpy_types(v) for k, v in obj.items()}
+        return {key: convert_numpy_types(value) for key, value in obj.items()}
     elif isinstance(obj, list):
-        return [convert_numpy_types(v) for v in obj]
-    elif isinstance(obj, np.generic):
-        return obj.item()
+        return [convert_numpy_types(item) for item in obj]
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
     return obj
 
 @app.post("/storage/{selected_option}/{container_name}/{file_name}")
@@ -144,19 +150,33 @@ async def store_data(
         df.columns = column_mapping.values()
         df = df.dropna(how='all').reset_index(drop=True)
 
+        # Initialize dq_rules and converted_dq_rules to empty dictionaries
+        dq_rules = {}
+        converted_dq_rules = {}
+
         # Detect and generate lookup tables using mapped column names
         try:
             current_df_string = df.to_csv(index=False)
             lookup_columns = detect_lookup_columns(current_df_string)
-            lookup_tables = generate_lookup_tables(current_df_string, lookup_columns) if lookup_columns else None
-            logger.info(f"Detected lookup columns: {lookup_columns}")
+            initial_lookup_tables = generate_lookup_tables(current_df_string, lookup_columns) if lookup_columns else None
+            
+            # Add validation step
+            if initial_lookup_tables:
+                validated_lookup_tables = validate_lookup_tables(initial_lookup_tables)
+                logger.info(f"Validated lookup tables: {validated_lookup_tables}")
+                
+                # Use validated lookup tables for DQ rule generation
+                dq_rules = generate_dq_rules(current_df_string, column_mapping, validated_lookup_tables)
+            else:
+                dq_rules = generate_dq_rules(current_df_string, column_mapping)
+                
+            # Convert numpy types to native Python types for serialization
+            converted_dq_rules = convert_numpy_types(dq_rules)
+                
         except Exception as e:
-            logger.warning(f"Error in lookup table detection/generation: {str(e)}")
-            lookup_tables = None
-
-        # DQ Rule generation (handles both cases)
-        dq_rules = generate_dq_rules(current_df_string, column_mapping, lookup_tables)
-        converted_dq_rules = convert_numpy_types(dq_rules)
+            logger.error(f"Error while generating DQ rules: {str(e)}")
+            # Ensure converted_dq_rules is at least an empty dict if there's an error
+            converted_dq_rules = convert_numpy_types(dq_rules)
 
         # Generate statistics for each column
         column_statistics = {}
@@ -187,14 +207,13 @@ async def store_data(
             stored_rules_paths[sanitized_name] = rules_file
 
         # Build response data
-        # Build response data
         response_data = {
             "status": "success",
             "message": f"Data processed for {file_name}",
             "table_name": table.name,
             "rules": converted_dq_rules,
             "type": "text",
-            "statistics": column_statistics,
+            "statistics": convert_numpy_types(column_statistics),  # Convert statistics as well
             "dq_dimensions": ["Validity", "Completeness", "Relevance"],
             "details": {
                 "has_headers": has_header,
@@ -210,17 +229,21 @@ async def store_data(
                 "status": "created with masked data"
             }
         }
-        
 
-        # Add lookup tables to response only if they exist
-        if lookup_tables:
+        # Initialize validated_lookup_tables variable to avoid reference errors
+        validated_lookup_tables = {}
+
+        # Update the response data to include both original and validated lookup tables
+        if 'initial_lookup_tables' in locals() and initial_lookup_tables:
+            validated_lookup_tables = locals().get('validated_lookup_tables', {})
             response_data.update({
                 "lookup_tables": {
-                    "columns": list(lookup_tables.keys()),
-                    "tables": lookup_tables
+                    "columns": list(validated_lookup_tables.keys()),
+                    "tables": validated_lookup_tables,
+                    "original_tables": initial_lookup_tables  # Optional: include original for comparison
                 }
             })
-
+        
         # Store metadata if needed
         metadata_file = os.path.join(file_rules_dir, "metadata.json")
         metadata = {
@@ -229,7 +252,7 @@ async def store_data(
             "column_mapping": column_mapping,
             "has_headers": has_header,
             "generated_columns": generated_columns if not has_header else None,
-            "lookup_tables": lookup_tables if lookup_tables else {},
+            "lookup_tables": validated_lookup_tables if 'initial_lookup_tables' in locals() and initial_lookup_tables else {},
             "table_name": table.name
         }
         with open(metadata_file, 'w') as f:
@@ -243,7 +266,6 @@ async def store_data(
         if len(error_detail) > 200:
             error_detail = error_detail[:200] + "..."
         raise HTTPException(500, detail=error_detail)
-
 
 @app.post("/invalid-data/{selected_option}/{container_name}/{file_name}")
 async def generate_invalid_data_queries(
@@ -266,7 +288,8 @@ async def generate_invalid_data_queries(
         results = {
             'successful_queries': {},
             'failed_queries': {},
-            'execution_logs': []
+            'execution_logs': [],
+            'cleanup_status': False
         }
         
         # Get sample data
@@ -275,6 +298,17 @@ async def generate_invalid_data_queries(
             for col in inspect(sandbox_engine).get_columns(table_name):
                 result = conn.execute(text(f"SELECT {col['name']} FROM {table_name} LIMIT 10"))
                 sample_data[col['name']] = [row[0] for row in result]
+        
+        total_rules = len([f for f in os.listdir(rules_dir) if f.endswith("_rules.json")])
+        if total_rules == 0:
+            tracker.logger.warning("No rules files found to process")
+            return JSONResponse({
+                "status": "warning",
+                "message": "No rules files found to process",
+                "results": results
+            })
+            
+        all_queries_successful = True  # Flag to track if all queries succeed
         
         # Process each rules file
         for rules_file in os.listdir(rules_dir):
@@ -287,6 +321,7 @@ async def generate_invalid_data_queries(
                 with open(os.path.join(rules_dir, rules_file), 'r') as f:
                     rules = json.load(f)
                 
+                # This will only return if query generation AND testing succeeds
                 query = query_generator.generate_and_test_query(
                     table_name=table_name,
                     column_name=col_name,
@@ -297,8 +332,19 @@ async def generate_invalid_data_queries(
                 results['successful_queries'][col_name] = query
                 
             except Exception as e:
+                all_queries_successful = False  # Mark as failed if any query fails
                 results['failed_queries'][col_name] = str(e)
-                tracker.logger.error(f"Failed to generate query for {col_name}: {str(e)}")
+                tracker.logger.error(f"Failed to generate/test query for {col_name}: {str(e)}")
+        
+        # Only drop the table if all queries were successfully generated AND tested
+        if all_queries_successful and len(results['successful_queries']) == total_rules:
+            results['cleanup_status'] = query_generator.drop_sandbox_table(table_name)
+            if results['cleanup_status']:
+                tracker.logger.info(f"Successfully dropped sandbox table {table_name} after all queries passed testing")
+            else:
+                tracker.logger.warning(f"Failed to drop sandbox table {table_name} after successful testing")
+        else:
+            tracker.logger.info(f"Keeping sandbox table {table_name} as some queries failed generation/testing")
         
         # Get execution logs
         log_path = tracker.output_dir / "query_generation.log"

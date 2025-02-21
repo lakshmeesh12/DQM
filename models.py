@@ -285,6 +285,15 @@ Sample Values:
 
 Rules to enforce:
 {chr(10).join(f'- {rule}' for rule in rules_list)}
+Pattern Analysis Guidelines:
+ {sample_data_str}
+- Analyze structural patterns in the data (e.g., prefixes, suffixes, character types)
+- Identify sequential or incremental patterns if they exist
+- Look for consistent formatting patterns (length, character positions)
+- Focus on character type patterns (digits, letters, special characters)
+- Note any delimiter or separator patterns
+- DO NOT specify exact value ranges or enumerate specific values
+- DO NOT hardcode start/end values from sample data
 
 Additional Context:
 - Column appears to contain {column_type} data
@@ -305,6 +314,33 @@ Requirements:
             prompt += "\nPlease fix the query to address this error."
             
         return prompt
+    
+    def drop_sandbox_table(self, table_name: str) -> bool:
+        """
+        Drop the specified table from sandbox database after successful query generation
+        
+        Args:
+            table_name (str): Name of the table to drop
+            
+        Returns:
+            bool: True if table was dropped successfully, False otherwise
+        """
+        try:
+            with self.sandbox_engine.connect() as conn:
+                # Check if table exists first
+                inspector = inspect(self.sandbox_engine)
+                if table_name in inspector.get_table_names():
+                    conn.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
+                    conn.commit()
+                    self.tracker.logger.info(f"Successfully dropped sandbox table: {table_name}")
+                    return True
+                else:
+                    self.tracker.logger.warning(f"Table {table_name} not found in sandbox database")
+                    return False
+                    
+        except Exception as e:
+            self.tracker.logger.error(f"Error dropping sandbox table {table_name}: {str(e)}")
+            return False
 
 class DynamicTableManager:
     def __init__(self):
@@ -314,7 +350,7 @@ class DynamicTableManager:
         self.sandbox_engine = create_engine("postgresql://postgres:Lakshmeesh@localhost:5432/DQM-sandbox")
         self.metadata = MetaData()  # Create new metadata instance for each manager
         self.sandbox_metadata = MetaData()  # Create separate metadata for sandbox
-        self.query_generator = SQLQueryGenerator()
+        self.query_generator = SQLQueryGenerator(self.sandbox_engine)
         self._Session = sessionmaker(bind=self.engine)
         
     def get_session(self):

@@ -4,9 +4,15 @@ import io
 import json
 import os
 import numpy as np
-from typing import List, Dict
+from typing import List, Dict, Optional
 from dotenv import load_dotenv
 import re
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 # Load environment variables
 load_dotenv()
 OPENAI_API_KEY = os.getenv("OPEN_AI_KEY")
@@ -16,7 +22,8 @@ if not OPENAI_API_KEY:
 
 client = openai.OpenAI(api_key=OPENAI_API_KEY)
 
-def detect_headers(data: str):
+
+def detect_headers(data: str) -> bool:
     """
     Detects if a CSV file has headers or not.
     Returns: bool - True if headers are present, False otherwise
@@ -34,7 +41,7 @@ def detect_headers(data: str):
         
         # Enhanced checks for data patterns:
         
-        # 1. Check for date patterns in first row
+        # 1. Check for date patterns
         def is_date(value):
             date_patterns = [
                 r'\d{2}[-/]\d{2}[-/]\d{4}',  # DD-MM-YYYY or DD/MM/YYYY
@@ -47,14 +54,12 @@ def detect_headers(data: str):
         rest_rows_dates = sum(is_date(x) for row in rest_of_rows.itertuples(index=False) 
                             for x in row)
         
-        # If first row has significantly different date pattern, it's likely data
         dates_ratio_different = (first_row_dates > 0 and 
                                abs(first_row_dates/len(first_row) - 
                                    rest_rows_dates/(len(rest_of_rows) * len(first_row))) < 0.2)
         
         # 2. Enhanced numeric pattern check
         def is_numeric_or_currency(value):
-            # Remove currency symbols and commas
             cleaned = str(value).replace('$', '').replace(',', '').strip()
             try:
                 float(cleaned)
@@ -66,12 +71,11 @@ def detect_headers(data: str):
         rest_rows_numeric = sum(is_numeric_or_currency(x) for row in rest_of_rows.itertuples(index=False) 
                               for x in row)
         
-        # If first row has similar numeric pattern to other rows, it's likely data
         numeric_ratio_similar = (first_row_numeric > 0 and 
                                abs(first_row_numeric/len(first_row) - 
                                    rest_rows_numeric/(len(rest_of_rows) * len(first_row))) < 0.2)
         
-        # 3. Check for common header words and patterns
+        # 3. Check for common header words
         header_patterns = [
             r'^id$', r'^name$', r'^date$', r'^type$', r'^category$',
             r'^amount$', r'^price$', r'^quantity$', r'^total$', r'^description$',
@@ -80,12 +84,11 @@ def detect_headers(data: str):
         
         def is_likely_header(value):
             value = str(value).lower().strip()
-            # Check if value matches common header patterns
             return any(re.match(pattern, value) for pattern in header_patterns)
         
         header_word_count = sum(is_likely_header(x) for x in first_row)
         
-        # 4. Check for consistent data format in subsequent rows
+        # 4. Check for consistent data format
         def get_data_format(value):
             if is_date(value):
                 return 'date'
@@ -103,21 +106,20 @@ def detect_headers(data: str):
             for formats in column_formats.values()
         )
         
-        # Combine all checks for final determination
         is_data_row = (
-            dates_ratio_different or  # First row has similar date patterns
-            numeric_ratio_similar or  # First row has similar numeric patterns
-            header_word_count == 0 or  # No common header words found
-            not consistent_formats  # Data format inconsistency in subsequent rows
+            dates_ratio_different or
+            numeric_ratio_similar or
+            header_word_count == 0 or
+            not consistent_formats
         )
         
-        return not is_data_row  # Return False if first row looks like data
+        return not is_data_row
         
     except Exception as e:
         logger.error(f"Error in header detection: {str(e)}")
-        return False  # Default to no headers on error
-
-def column_name_gen(data: str, model: str = "gpt-4-turbo"):
+        return False
+    
+def column_name_gen(data: str, model: str = "o3-mini"):
     """
     Generates meaningful column names if a CSV file lacks headers.
     """
@@ -153,7 +155,6 @@ def column_name_gen(data: str, model: str = "gpt-4-turbo"):
                     """
                 }
             ],
-            temperature=0.4,
             response_format={"type": "json_object"}
         )
 
@@ -165,17 +166,99 @@ def column_name_gen(data: str, model: str = "gpt-4-turbo"):
         # Fallback to basic column names if generation fails
         return {str(i): f"Column_{i+1}" for i in range(actual_column_count)}
 
+def detect_lookup_columns(data: str, model: str = "o3-mini") -> List[str]:
+    """
+    Analyzes columns to determine which ones would benefit from lookup tables.
+    Returns a list of column names that need lookup tables.
+    """
+    try:
+        df = pd.read_csv(io.StringIO(data))
+        
+        # Prepare sample data for analysis
+        sample_data = {}
+        for col in df.columns:
+            total_rows = len(df)
+            unique_values = df[col].nunique()
+            unique_ratio = unique_values / total_rows
+            
+            # Get sample of unique values and their frequencies
+            value_counts = df[col].value_counts().head(10)
+            
+            sample_data[col] = {
+                "unique_count": int(unique_values),
+                "unique_ratio": float(unique_ratio),
+                "sample_values": value_counts.index.tolist(),
+                "value_frequencies": value_counts.to_dict()
+            }
+
+        prompt = f"""
+        Analyze these columns and determine which ones should have lookup tables.
+        A column needs a lookup table if it meets these criteria:
+        1. Has a relatively small set of distinct values (low unique ratio)
+        2. Contains categorical or predefined options
+        3. Values should be restricted to a specific set
+        4. Represents attributes like status, category, type, etc.
+
+        Column statistics and samples:
+        {json.dumps(sample_data, indent=2)}
+
+        Return a JSON object with format: {{"columns": ["column1", "column2"]}}
+        Include only columns that strongly match the criteria for lookup tables.
+        """
+
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You are a data analyst identifying columns that need lookup tables."},
+                {"role": "user", "content": prompt}
+            ],
+            
+            response_format={"type": "json_object"}
+        )
+
+        result = json.loads(response.choices[0].message.content)
+        return result.get("columns", [])
+
+    except Exception as e:
+        logger.error(f"Error in lookup column detection: {str(e)}")
+        return []
+
+def generate_lookup_tables(data: str, lookup_columns: List[str]) -> Dict[str, List[str]]:
+    """
+    Creates lookup tables for specified columns based on actual data.
+    """
+    try:
+        df = pd.read_csv(io.StringIO(data))
+        lookup_tables = {}
+
+        for column in lookup_columns:
+            if column in df.columns:
+                # Get unique values, excluding null/empty values
+                values = df[column].dropna().astype(str)
+                values = values[values.str.strip() != '']
+                unique_values = values.unique().tolist()
+                
+                # Clean and sort values
+                cleaned_values = sorted([str(v).strip() for v in unique_values])
+                
+                if cleaned_values:  # Only add if there are valid values
+                    lookup_tables[column] = cleaned_values
+
+        return lookup_tables
+
+    except Exception as e:
+        logger.error(f"Error in lookup table generation: {str(e)}")
+        return {}
+
 def classify_columns(df):
     """
     Classify columns as numerical or textual based on their content.
     """
     classifications = {}
     for column in df.columns:
-        # Try to convert to numeric, count success rate
         numeric_count = pd.to_numeric(df[column], errors='coerce').notna().sum()
         total_count = len(df[column].dropna())
         
-        # If more than 80% of non-null values are numeric, classify as numeric
         if total_count > 0 and (numeric_count / total_count) > 0.8:
             classifications[column] = 'numeric'
         else:
@@ -204,67 +287,167 @@ def generate_column_stats(df, column_name, column_type):
             'std': float(numeric_data.std()) if not pd.isna(numeric_data.std()) else None
         })
     else:
-        # Text-specific statistics
         non_empty_strings = df[column_name].astype(str).str.strip().str.len() > 0
         stats['non_empty_ratio'] = (non_empty_strings.sum() / non_null_count) * 100 if non_null_count > 0 else 0
         
     return stats
 
-def generate_dq_rules(data: str, column_info: dict, model: str = "gpt-4-turbo"):
+
+def validate_lookup_tables(lookup_tables: Dict[str, List[str]], model: str = "o3-mini") -> Dict[str, List[str]]:
     """
-    Generate data quality rules for each column based on the data and DQ dimensions.
+    Validate lookup table values against their column names using LLM to ensure relevancy.
+    
+    Args:
+        lookup_tables (Dict[str, List[str]]): Original lookup tables with column names and their values
+        model (str): LLM model to use for validation
+        
+    Returns:
+        Dict[str, List[str]]: Validated lookup tables with irrelevant values removed
     """
-    df = pd.read_csv(io.StringIO(data))
+    if not lookup_tables:
+        return {}
     
-    # Classify columns
-    column_classifications = classify_columns(df)
+    validated_tables = {}
     
-    # Generate stats for each column
-    column_stats = {}
-    for col_name in df.columns:
-        column_stats[col_name] = generate_column_stats(
-            df, col_name, 
-            column_classifications[col_name]
+    for column_name, values in lookup_tables.items():
+        # Skip if no values
+        if not values:
+            continue
+            
+        # Construct prompt for LLM
+        validation_prompt = f"""
+        Analyze the relevancy between the column name '{column_name}' and its lookup values.
+        
+        Values: {json.dumps(values, indent=2)}
+        
+        Task:
+        1. Determine if each value is semantically relevant to what the column name represents
+        2. Consider common variations, misspellings, and industry-specific terms
+        3. Flag any values that are:
+           - Completely unrelated to the column concept
+           - Obvious typos or misspellings
+           - Nonsensical or invalid entries
+        
+        Return a JSON object with this structure:
+        {{
+            "valid_values": ["list of relevant values"],
+            "invalid_values": ["list of irrelevant values"],
+            "reasoning": "brief explanation of why certain values were flagged as invalid"
+        }}
+        """
+        
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "You are a data quality expert analyzing the semantic relevancy between column names and their values."},
+                    {"role": "user", "content": validation_prompt}
+                ],
+                response_format={"type": "json_object"}
+            )
+            
+            validation_result = json.loads(response.choices[0].message.content)
+            
+            # Log invalid values and reasoning for debugging
+            if validation_result.get("invalid_values"):
+                logger.info(
+                    f"Invalid values found for column '{column_name}': "
+                    f"{validation_result['invalid_values']} - "
+                    f"Reason: {validation_result.get('reasoning')}"
+                )
+            
+            # Only keep valid values for the lookup table
+            if validation_result.get("valid_values"):
+                validated_tables[column_name] = validation_result["valid_values"]
+        
+        except Exception as e:
+            logger.error(f"Error validating lookup table for column '{column_name}': {str(e)}")
+            # Fall back to original values if validation fails
+            validated_tables[column_name] = values
+            
+    return validated_tables
+
+def generate_dq_rules(data: str, column_info: dict, lookup_tables: Optional[Dict[str, List[str]]] = None, model: str = "o3-mini"):
+    """
+    Generate data quality rules for each column, incorporating lookup table validation if available.
+    """
+    try:
+        df = pd.read_csv(io.StringIO(data))
+        row_count = len(df)  # Count rows sent to LLM
+        logger.info(f"Rows sent to LLM for DQ rule generation: {row_count}")
+        
+        # Classify columns
+        column_classifications = classify_columns(df)
+        
+        # Generate stats for each column
+        column_stats = {}
+        for col_name in df.columns:
+            column_stats[col_name] = generate_column_stats(
+                df, col_name, 
+                column_classifications[col_name]
+            )
+        
+        # Base prompt
+        base_prompt = f"""
+        Generate comprehensive data quality (DQ) rules for each column in the dataset.
+        Consider these data quality dimensions:
+        - Accuracy
+        - Completeness
+        - Consistency
+        - Validity
+        - Timeliness
+        - Uniqueness
+        - Integrity
+        - Relevance
+        - Reliability
+        - Accessibility
+        - Compliance
+
+        Column information:
+        {json.dumps(column_info, indent=2)}
+
+        Column classifications and statistics:
+        {json.dumps(column_stats, indent=2)}
+        """
+        
+        # Add lookup table information if available
+        if lookup_tables and len(lookup_tables) > 0:
+            lookup_prompt = f"""
+            Lookup Tables Information:
+            {json.dumps(lookup_tables, indent=2)}
+
+            For columns with lookup tables:
+            - MUST include a rule ensuring values exist only in the lookup table
+            - List the valid values in the rule description
+            - Mark these rules as 'Validity' dimension
+            - Example rule format: "Values must be one of: [list of valid values]"
+            """
+            base_prompt += "\n" + lookup_prompt
+
+        base_prompt += """
+        Return a JSON object with rules for each column, formatted as:
+        {"column_name": {"rules": [], "type": "numeric/text", "statistics": {}, "dq_dimensions": []}}
+        """
+
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": "You are a data quality expert generating comprehensive DQ rules."},
+                {"role": "user", "content": base_prompt}
+            ],
+        
+            response_format={"type": "json_object"}
         )
-    
-    # Generate rules using LLM
-    prompt_content = f"""
-    Generate comprehensive data quality rules for each column in the dataset.
-    Consider these data quality dimensions:
-    - Accuracy
-    - Completeness
-    - Consistency
-    - Validity
-    - Timeliness
-    - Uniqueness
-    - Integrity
-    - Relevance
-    - Reliability
-    - Accessibility
-    - Compliance
 
-    Column information:
-    {json.dumps(column_info, indent=2)}
+        rules = json.loads(response.choices[0].message.content)
+        
+        # Merge generated rules with statistics
+        for column in rules:
+            if column in column_stats:
+                rules[column]['statistics'] = column_stats[column]
+        
+        return rules
 
-    Column classifications and statistics:
-    {json.dumps(column_stats, indent=2)}
-
-    Return a JSON object with rules for each column, aligned with the relevant DQ dimensions.
-    Format: {{"column_name": {{"rules": [], "type": "numeric/text", "statistics": {{}}, "dq_dimensions": []}}}}
-    """
-
-    response = client.chat.completions.create(
-        model=model,
-        messages=[{"role": "user", "content": prompt_content}],
-        temperature=0.4,
-    )
-
-    rules = json.loads(response.choices[0].message.content.strip()
-                      .replace('```json\n', '').replace('\n```', ''))
-    
-    # Merge generated rules with statistics
-    for column in rules:
-        if column in column_stats:
-            rules[column]['statistics'] = column_stats[column]
-    
-    return rules
+    except Exception as e:
+        logger.error(f"Error in DQ rule generation: {str(e)}")
+        return {}

@@ -19,6 +19,11 @@ from sqlalchemy.sql import text
 from models import DynamicTableManager
 from models import SQLQueryGenerator
 from models import QueryTracker
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import JSONResponse
+import asyncio
+import asyncpg.exceptions
+from sqlalchemy.ext.asyncio import create_async_engine
 from sse_starlette.sse import EventSourceResponse
 from file_manager import (
     list_s3_buckets, list_s3_files, read_s3_file,
@@ -267,32 +272,21 @@ async def store_data(
             error_detail = error_detail[:200] + "..."
         raise HTTPException(500, detail=error_detail)
 
+
+
 @app.post("/invalid-data/{selected_option}/{container_name}/{file_name}")
-async def generate_invalid_data_queries(
-    selected_option: str,
-    container_name: str,
-    file_name: str
-):
+def generate_invalid_data_queries(selected_option: str, container_name: str, file_name: str):
     try:
-        # Setup
         file_base_name = file_name.split('.')[0].lower()
         rules_dir = os.path.join("rules", file_base_name)
         table_name = f"data_{file_base_name.replace('-', '_')}"
         sandbox_engine = create_engine("postgresql://postgres:Lakshmeesh@localhost:5432/DQM-sandbox")
         
-        # Initialize enhanced components
         tracker = QueryTracker(output_dir=f"query_logs/{file_base_name}")
         query_generator = SQLQueryGenerator(sandbox_engine, tracker)
         
-        # Process rules and generate queries
-        results = {
-            'successful_queries': {},
-            'failed_queries': {},
-            'execution_logs': [],
-            'cleanup_status': False
-        }
+        results = {'successful_queries': {}, 'failed_queries': {}, 'execution_logs': [], 'cleanup_status': False}
         
-        # Get sample data
         with sandbox_engine.connect() as conn:
             sample_data = {}
             for col in inspect(sandbox_engine).get_columns(table_name):
@@ -302,65 +296,73 @@ async def generate_invalid_data_queries(
         total_rules = len([f for f in os.listdir(rules_dir) if f.endswith("_rules.json")])
         if total_rules == 0:
             tracker.logger.warning("No rules files found to process")
-            return JSONResponse({
-                "status": "warning",
-                "message": "No rules files found to process",
-                "results": results
-            })
-            
-        all_queries_successful = True  # Flag to track if all queries succeed
+            return JSONResponse({"status": "warning", "message": "No rules files found to process", "results": results})
         
-        # Process each rules file
+        all_queries_successful = True
         for rules_file in os.listdir(rules_dir):
             if not rules_file.endswith("_rules.json"):
                 continue
-                
             col_name = rules_file.replace("_rules.json", "")
-            
             try:
                 with open(os.path.join(rules_dir, rules_file), 'r') as f:
                     rules = json.load(f)
-                
-                # This will only return if query generation AND testing succeeds
                 query = query_generator.generate_and_test_query(
                     table_name=table_name,
                     column_name=col_name,
                     rules=rules,
                     sample_data=sample_data.get(col_name, [])
                 )
-                
                 results['successful_queries'][col_name] = query
-                
             except Exception as e:
-                all_queries_successful = False  # Mark as failed if any query fails
+                all_queries_successful = False
                 results['failed_queries'][col_name] = str(e)
                 tracker.logger.error(f"Failed to generate/test query for {col_name}: {str(e)}")
         
-        # Only drop the table if all queries were successfully generated AND tested
         if all_queries_successful and len(results['successful_queries']) == total_rules:
             results['cleanup_status'] = query_generator.drop_sandbox_table(table_name)
-            if results['cleanup_status']:
-                tracker.logger.info(f"Successfully dropped sandbox table {table_name} after all queries passed testing")
-            else:
-                tracker.logger.warning(f"Failed to drop sandbox table {table_name} after successful testing")
-        else:
-            tracker.logger.info(f"Keeping sandbox table {table_name} as some queries failed generation/testing")
+            tracker.logger.info(f"Cleanup: {results['cleanup_status']}")
         
-        # Get execution logs
         log_path = tracker.output_dir / "query_generation.log"
         if log_path.exists():
             with open(log_path, 'r') as f:
                 results['execution_logs'] = f.readlines()
         
-        return JSONResponse({
-            "status": "success",
-            "results": results
-        })
-        
+        return JSONResponse({"status": "success", "results": results})
+    
     except Exception as e:
-        logger.error(f"Query generation error: {str(e)}")
-        raise HTTPException(500, detail=str(e))
- 
+        detailed_error = f"Query generation error: {str(e)}"
+        logger.error(detailed_error)
+        raise HTTPException(500, detail=detailed_error)
+
+@app.post("/execute-queries/{container_name}/{file_name}")
+def execute_stored_queries(container_name: str, file_name: str):
+    """Execute pre-tested queries and store invalid records in DQM."""
+    try:
+        file_base_name = file_name.split('.')[0].lower()
+        table_name = f"data_{file_base_name.replace('-', '_')}"
+        tracker = QueryTracker(output_dir=f"query_logs/{file_base_name}")
+        
+        # Use a dummy sandbox engine since we only need main_engine here
+        query_generator = SQLQueryGenerator(create_engine("postgresql://postgres:Lakshmeesh@localhost:5432/DQM-sandbox"), tracker)
+        execution_results = query_generator.store_invalid_records(table_name)
+        
+        results = {
+            'successful_executions': execution_results['successful_executions'],
+            'failed_executions': execution_results['failed_executions'],
+            'execution_logs': []
+        }
+        
+        log_path = tracker.output_dir / "query_generation.log"
+        if log_path.exists():
+            with open(log_path, 'r') as f:
+                results['execution_logs'] = f.readlines()
+        
+        return JSONResponse({"status": "success", "results": results})
+    
+    except Exception as e:
+        detailed_error = f"Query execution error for {file_name}: {str(e)}"
+        logger.error(detailed_error)
+        raise HTTPException(500, detail=detailed_error)
 # @app.get("/table-schema/{table_name}")
 # async def get_table_schema(table_name: str):
 #     try:

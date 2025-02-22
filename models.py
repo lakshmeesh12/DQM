@@ -14,6 +14,13 @@ import numpy as np
 from dataclasses import dataclass
 from sqlalchemy.ext.declarative import declarative_base
 from pathlib import Path
+import asyncio
+import aiohttp
+from sqlalchemy import create_engine, text, inspect, Table, Column, Integer, Text, MetaData
+from typing import Optional, List, Dict
+from sqlalchemy import text
+from typing import Optional, List, Dict
+import logging
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -34,39 +41,31 @@ class DatabaseError(Exception):
     pass
 @dataclass
 class QueryAttempt:
-    """Track each query generation attempt"""
-    column_name: str
-    rules: dict
-    sample_data: list
-    prompt: str
-    llm_response: str
-    generated_query: str
-    execution_error: Optional[str] = None
-    execution_result: Optional[Dict] = None
-    timestamp: str = datetime.now().isoformat()
+    def __init__(self, column_name: str, rules: dict, sample_data: list, prompt: str, llm_response: str, generated_query: str):
+        self.column_name = column_name
+        self.rules = rules
+        self.sample_data = sample_data
+        self.prompt = prompt
+        self.llm_response = llm_response
+        self.generated_query = generated_query
+        self.execution_error = None
+        self.execution_result = None
+        self.timestamp = datetime.now().isoformat()
 
 class QueryTracker:
-    """Handle logging and tracking of query generation process"""
     def __init__(self, output_dir: str = "query_logs"):
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(exist_ok=True)
-        
-        # Set up logging
         self.logger = logging.getLogger("QueryTracker")
         self.logger.setLevel(logging.INFO)
-        
-        # File handler
         fh = logging.FileHandler(self.output_dir / "query_generation.log")
         fh.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
         self.logger.addHandler(fh)
 
-    def save_attempt(self, attempt: QueryAttempt, table_name: str):
-        """Save attempt details to JSON file"""
+    def save_attempt(self, attempt: 'QueryAttempt', table_name: str):
         attempt_dir = self.output_dir / table_name / attempt.column_name
         attempt_dir.mkdir(parents=True, exist_ok=True)
-        
         filename = f"attempt_{datetime.fromisoformat(attempt.timestamp).strftime('%Y%m%d_%H%M%S')}.json"
-        
         with open(attempt_dir / filename, 'w') as f:
             json.dump({
                 'column_name': attempt.column_name,
@@ -81,72 +80,39 @@ class QueryTracker:
             }, f, indent=2)
 
     def save_successful_query(self, query: str, table_name: str, column_name: str):
-        """
-        Save successful query to the Query directory, organized by table name
-        
-        Args:
-            query (str): The SQL query to save
-            table_name (str): Name of the table the query is for
-            column_name (str): Name of the column the query is for
-        """
-        # Use Query directory in project root
         query_dir = Path("Query")
-        
-        # Create table-specific directory
         table_dir = query_dir / table_name / "filename"
         table_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Save query with column name
         filename = f"{column_name}.sql"
         with open(table_dir / filename, 'w') as f:
             f.write(query)
             
 class SQLQueryGenerator:
     def __init__(self, sandbox_engine, tracker: Optional[QueryTracker] = None):
-        super().__init__()
         self.sandbox_engine = sandbox_engine
+        self.main_engine = create_engine("postgresql://postgres:Lakshmeesh@localhost:5432/DQM")
         self.tracker = tracker or QueryTracker()
+        self.metadata = MetaData()
 
     @staticmethod
     def _extract_sql_query(response: str) -> str:
-        """Extract the actual SQL query from the OpenAI response."""
-        # Existing extraction logic remains the same
-        markers = [
-            ('SELECT', ';'),
-            ('SELECT', '\n\n'),
-            ('SELECT', '--'),
-        ]
-        
+        markers = [('SELECT', ';'), ('SELECT', '\n\n'), ('SELECT', '--')]
         for start_marker, end_marker in markers:
             try:
                 start_idx = response.find(start_marker)
                 if start_idx != -1:
-                    if end_marker == ';':
-                        end_idx = response.find(';', start_idx)
-                        if end_idx != -1:
-                            return response[start_idx:end_idx + 1]
-                    else:
-                        end_idx = response.find(end_marker, start_idx)
-                        if end_idx != -1:
-                            return response[start_idx:end_idx]
+                    end_idx = response.find(end_marker, start_idx)
+                    if end_idx != -1:
+                        return response[start_idx:end_idx + 1 if end_marker == ';' else end_idx]
             except Exception:
                 continue
-        
-        query_lines = []
-        for line in response.split('\n'):
-            line = line.strip()
-            if (line and 
-                not line.startswith('--') and 
-                not line.lower().startswith('below') and
-                not line.lower().startswith('explanation') and
-                not line.startswith('-'*5)):
-                query_lines.append(line)
-        
+        query_lines = [line.strip() for line in response.split('\n') if line.strip() and 
+                       not line.startswith('--') and not line.lower().startswith(('below', 'explanation')) and 
+                       not line.startswith('-----')]
         return ' '.join(query_lines)
 
     @staticmethod
     def _get_column_type(engine, table_name: str, column_name: str) -> str:
-        """Get the PostgreSQL data type of a column."""
         try:
             inspector = inspect(engine)
             columns = inspector.get_columns(table_name)
@@ -159,14 +125,9 @@ class SQLQueryGenerator:
 
     @staticmethod
     def _process_query(query: str, table_name: str, column_name: str, engine, sample_data: list, rules: dict) -> str:
-        """Enhanced query processing that preserves LLM-generated logic while adding safety checks"""
         if not query.strip():
             return f"SELECT * FROM {table_name} WHERE {column_name} IS NULL"
-
-        # Get column type
         column_type = SQLQueryGenerator._get_column_type(engine, table_name, column_name)
-        
-        # Extract valid values if specified in rules
         valid_values = None
         for rule in rules.get('rules', []):
             if 'must be one of:' in rule.lower():
@@ -174,54 +135,31 @@ class SQLQueryGenerator:
                     valid_values = re.search(r'\[(.*?)\]', rule).group(1).split(', ')
                 except:
                     pass
-
-        # Check if the query already contains the main validation logic
         has_null_check = 'IS NULL' in query.upper()
         has_empty_check = "= ''" in query or 'TRIM' in query.upper()
         has_valid_values = valid_values and any(val in query for val in valid_values)
-        
-        # Only enhance the query if it's missing critical checks
         if not (has_null_check and has_empty_check):
-            base_conditions = [
-                f"{column_name} IS NULL",
-                f"trim({column_name})::text = ''",
-            ]
-            
-            # Add valid values check if specified in rules and not already present
+            base_conditions = [f"{column_name} IS NULL", f"trim({column_name})::text = ''"]
             if valid_values and not has_valid_values:
                 values_list = "'" + "', '".join(valid_values) + "'"
                 base_conditions.append(f"{column_name} NOT IN ({values_list})")
-            
-            # Merge with existing conditions if any
             if 'WHERE' in query.upper():
                 existing_conditions = query[query.upper().find('WHERE') + 5:].strip()
                 if existing_conditions:
                     base_conditions.extend([cond.strip() for cond in existing_conditions.split('OR')])
-            
-            # Rebuild the query
-            query = f"""
-            SELECT * FROM {table_name}
-            WHERE {' OR '.join(base_conditions)}
-            """
-
+            query = f"SELECT * FROM {table_name} WHERE {' OR '.join(base_conditions)}"
         return query.strip()
 
     def generate_and_test_query(self, table_name: str, column_name: str, rules: dict, sample_data: list) -> str:
-        """Generate and test a query with enhanced error handling"""
-        max_attempts = 3
+        max_attempts = 5
         attempt = 0
         last_error = None
         
         while attempt < max_attempts:
             self.tracker.logger.info(f"Attempt {attempt + 1}/{max_attempts} for {table_name}.{column_name}")
             try:
-                # Format sample data for prompt
                 sample_data_str = "\n".join([f"- {str(value)}" for value in sample_data if value is not None])
-                
-                # Build prompt
-                prompt = self._build_prompt(table_name, column_name, rules, sample_data_str, last_error)
-                
-                # Get LLM response
+                prompt = self._build_prompt(table_name, column_name, rules, sample_data_str, last_error, attempt)
                 response = client.chat.completions.create(
                     model="o3-mini",
                     messages=[
@@ -229,13 +167,10 @@ class SQLQueryGenerator:
                         {"role": "user", "content": prompt}
                     ]
                 )
-                
                 llm_response = response.choices[0].message.content.strip()
                 raw_query = self._extract_sql_query(llm_response)
                 processed_query = self._process_query(raw_query, table_name, column_name, 
-                                                   self.sandbox_engine, sample_data, rules)
-                
-                # Create attempt record and test the query
+                                                     self.sandbox_engine, sample_data, rules)
                 current_attempt = QueryAttempt(
                     column_name=column_name,
                     rules=rules,
@@ -244,103 +179,178 @@ class SQLQueryGenerator:
                     llm_response=llm_response,
                     generated_query=processed_query
                 )
-                
-                # Test execution
                 self.tracker.logger.info(f"Testing query:\n{processed_query}")
                 with self.sandbox_engine.connect() as conn:
                     result = conn.execute(text(processed_query))
                     rows = result.fetchall()
-                    
-                    current_attempt.execution_result = {
-                        'rows_returned': len(rows),
-                        'success': True
-                    }
-                    
+                    current_attempt.execution_result = {'rows_returned': len(rows), 'success': True}
                     self.tracker.save_attempt(current_attempt, table_name)
                     self.tracker.save_successful_query(processed_query, table_name, column_name)
-                    
                     return processed_query
-                    
             except Exception as e:
-                error_msg = str(e)
+                error_msg = f"Error in attempt {attempt + 1}: {str(e)}"
                 last_error = error_msg
+                self.tracker.logger.error(error_msg)
                 attempt += 1
-                
                 if attempt == max_attempts:
                     raise ValueError(f"Failed to generate valid query after {max_attempts} attempts: {error_msg}")
-                
         raise ValueError(f"Failed to generate valid query after {max_attempts} attempts")
 
     def _build_prompt(self, table_name: str, column_name: str, rules: dict, 
-                     sample_data_str: str, last_error: Optional[str] = None) -> str:
-        """Build prompt with error context if available"""
+                     sample_data_str: str, last_error: Optional[str] = None, attempt: int = 0) -> str:
         column_type = self._get_column_type(self.sandbox_engine, table_name, column_name)
         rules_list = rules.get('rules', [])
-        
         prompt = f"""Generate a PostgreSQL query to find data quality issues in column '{column_name}' of table '{table_name}'.
 
-Column Type: {column_type}
-Sample Values:
-{sample_data_str}
+    Column Type: {column_type}
+    Sample Values:
+    {sample_data_str}
 
-Rules to enforce:
-{chr(10).join(f'- {rule}' for rule in rules_list)}
-Pattern Analysis Guidelines:
- {sample_data_str}
-- Analyze structural patterns in the data (e.g., prefixes, suffixes, character types)
-- Identify sequential or incremental patterns if they exist
-- Look for consistent formatting patterns (length, character positions)
-- Focus on character type patterns (digits, letters, special characters)
-- Note any delimiter or separator patterns
-- DO NOT specify exact value ranges or enumerate specific values
-- DO NOT hardcode start/end values from sample data
+    Rules to enforce:
+    {chr(10).join(f'- {rule}' for rule in rules_list)}
 
-Additional Context:
-- Column appears to contain {column_type} data
-- Need to find rows that violate any of the above rules
-- Sample data provides context but rules should apply to all data
-- Consider patterns and value in sample data
+    Additional Context:
+    - Column appears to contain {column_type} data
+    - Need to find rows that violate any of the above rules
+    - Sample data provides context for patterns (e.g., length, format) to enforce rules
+    - Focus on converting rules and sample data patterns into SQL conditions
 
-Requirements:
-- Return full rows using SELECT * FROM {table_name}
-- Handle NULL and empty values
-- Use proper type casting for {column_type}
-- Combine all conditions with OR
-- Include range validation based on sample data
-- Add pattern matching for text fields if applicable"""
+    Requirements:
+    - Return full rows using SELECT * FROM {table_name}
+    - Handle NULL and empty values explicitly (e.g., IS NULL, TRIM(column) = '')
+    - Use proper type casting for {column_type} if needed
+    - Combine all conditions with OR
+    - Use simple SQL conditions (e.g., IN, NOT NULL, LIKE, regex) based on rules and sample data
+    - DO NOT use a CTE or 'stats' unless a rule explicitly requires statistical calculations (e.g., min/max from data)
+    - If a rule requires statistics, use 'WITH stats AS (...)' with perfect syntax: no extra parentheses, proper referencing"""
 
-        if last_error:
-            prompt += f"\n\nPrevious attempt failed with error: {last_error}"
-            prompt += "\nPlease fix the query to address this error."
-            
+        if last_error and attempt in [1, 2]:
+            prompt += f"""\n\nPrevious attempt failed with error: {last_error}
+    Error Handling:
+    1. Check if the error is due to syntax (e.g., extra ')', missing clauses) or logic (e.g., invalid conditions)
+    2. Fix syntax issues:
+    - Remove extra parentheses if present
+    - Ensure no standalone subqueries without 'WITH stats AS' if stats are used
+    3. If stats were used incorrectly:
+    - Remove 'stats' references unless a rule explicitly requires it
+    - If required, wrap stats in 'WITH stats AS (...)' correctly
+    4. Adjust the query to better align with rules and sample data patterns
+    Please fix the query while maintaining the rule enforcement."""
+        if attempt == 3:
+            prompt += f"""\n\nThis is the 4th attempt. Previous attempts failed with error: {last_error}.
+    Rule and Error Analysis Required:
+    1. Analyze the rules and sample data patterns to identify complexity or ambiguity
+    2. Review the previous error to determine if it’s due to:
+    - Complex rules not easily convertible to SQL
+    - Syntax errors (e.g., extra ')', missing CTE for stats)
+    3. Reframe complex rules into simpler, SQL-friendly conditions:
+    - Break down vague rules (e.g., 'ensure accuracy') into specific checks (e.g., length, regex)
+    - Use sample data patterns to guide simplification (e.g., consistent formats)
+    4. If stats are needed (e.g., min/max from data):
+    - Use 'WITH stats AS (...)' with perfect syntax: no extra parentheses, proper CROSS JOIN stats
+    - Calculate stats from '{table_name}', not hardcoded values
+    5. Focus on main patterns (e.g., length, format) that can be easily converted to SQL
+    Please generate a query with restructured rules and error fixes."""
+        if attempt == 4:
+            prompt += f"""\n\nThis is the 5th and final attempt. Previous attempts failed with error: {last_error}.
+    Final Rule and Error Resolution:
+    1. Determine the intent of each rule and its measurable aspects
+    2. Convert rules to concrete SQL conditions using sample data patterns
+    3. Simplify any remaining complex conditions:
+    - Approximate vague rules with practical checks (e.g., length, regex)
+    - Prioritize enforceable patterns over ambiguous ones
+    4. If stats are explicitly required by a rule:
+    - Use 'WITH stats AS (...)' with impeccable syntax: no extra parentheses, proper referencing
+    - Calculate stats directly from '{table_name}'
+    5. Ensure syntax perfection: no unmatched parentheses, no undefined references
+    Please generate a query with simplified rules and error corrections."""
         return prompt
-    
+
     def drop_sandbox_table(self, table_name: str) -> bool:
-        """
-        Drop the specified table from sandbox database after successful query generation
-        
-        Args:
-            table_name (str): Name of the table to drop
-            
-        Returns:
-            bool: True if table was dropped successfully, False otherwise
-        """
         try:
             with self.sandbox_engine.connect() as conn:
-                # Check if table exists first
-                inspector = inspect(self.sandbox_engine)
-                if table_name in inspector.get_table_names():
-                    conn.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
-                    conn.commit()
-                    self.tracker.logger.info(f"Successfully dropped sandbox table: {table_name}")
-                    return True
-                else:
-                    self.tracker.logger.warning(f"Table {table_name} not found in sandbox database")
-                    return False
-                    
-        except Exception as e:
-            self.tracker.logger.error(f"Error dropping sandbox table {table_name}: {str(e)}")
+                conn.execute(text(f"DROP TABLE IF EXISTS {table_name}"))
+            return True
+        except Exception:
             return False
+
+    def create_invalid_records_table(self, table_name: str) -> Table:
+        """Create a table in DQM to store invalid records."""
+        invalid_table_name = f"invalid_records_{table_name}"
+        try:
+            with self.main_engine.connect() as conn:
+                conn.execute(text(f"DROP TABLE IF EXISTS {invalid_table_name}"))
+            
+            invalid_table = Table(
+                invalid_table_name, self.metadata,
+                Column('key', Integer, primary_key=True),
+                Column('surrogate_key', Integer),  # References original table's id
+                Column('invalid_column', Text),    # Column name (mostly text)
+                Column('invalid_value', Text)      # Value (cast all to text for flexibility)
+            )
+            invalid_table.create(self.main_engine)
+            logger.info(f"Created table {invalid_table_name} in DQM database")
+            return invalid_table
+        except Exception as e:
+            logger.error(f"Failed to create invalid records table {invalid_table_name}: {str(e)}")
+            raise
+
+    def store_invalid_records(self, table_name: str) -> Dict[str, Dict[str, any]]:
+        """Execute queries from Query dir and store invalid records in DQM."""
+        results = {'successful_executions': {}, 'failed_executions': {}}
+        query_dir = Path("Query") / table_name / "filename"
+        
+        if not query_dir.exists():
+            logger.error(f"Query directory {query_dir} does not exist")
+            return results
+        
+        invalid_table = self.create_invalid_records_table(table_name)
+        
+        for query_file in query_dir.glob("*.sql"):
+            column_name = query_file.stem
+            try:
+                with open(query_file, 'r') as f:
+                    query = f.read().strip()
+                
+                logger.info(f"Executing query for {table_name}.{column_name}:\n{query}")
+                with self.main_engine.connect() as conn:
+                    result = conn.execute(text(query))
+                    rows = list(result.mappings())  # Convert MappingResult to list of dicts
+                    affected_rows = len(rows)
+                    
+                    # Store invalid records
+                    invalid_records = [
+                        {
+                            'surrogate_key': row['id'],
+                            'invalid_column': column_name,
+                            'invalid_value': str(row[column_name]) if row[column_name] is not None else 'NULL'
+                        }
+                        for row in rows
+                    ]
+                    
+                    if invalid_records:
+                        conn.execute(
+                            invalid_table.insert(),
+                            invalid_records
+                        )
+                        conn.commit()
+                    
+                    results['successful_executions'][column_name] = {
+                        'query': query,
+                        'affected_rows': affected_rows,
+                        'stored_invalid_rows': len(invalid_records)
+                    }
+                    logger.info(f"Stored {len(invalid_records)} invalid rows for {column_name}")
+            
+            except Exception as e:
+                error_msg = f"Failed to execute/store query for {column_name}: {str(e)}"
+                results['failed_executions'][column_name] = {
+                    'query': query if 'query' in locals() else None,
+                    'error': error_msg
+                }
+                logger.error(error_msg)
+        
+        return results
 
 class DynamicTableManager:
     def __init__(self):

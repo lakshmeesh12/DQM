@@ -22,16 +22,20 @@ from models import QueryTracker
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 import asyncio
+from pathlib import Path
+from datetime import time, datetime
+import time
 import asyncpg.exceptions
 from sqlalchemy.ext.asyncio import create_async_engine
+from rule import RuleAdd, RuleUpdate, SingleRuleUpdate, add_rule, delete_rule, load_rules
 from sse_starlette.sse import EventSourceResponse
 from file_manager import (
     list_s3_buckets, list_s3_files, read_s3_file,
     list_azure_containers, list_azure_files, read_azure_file
 )
 from llm import column_name_gen, detect_headers, generate_dq_rules, detect_lookup_columns, generate_lookup_tables
-# from data_process import DataStreamProcessor
 from llm import validate_lookup_tables
+from data_validation import DataValidator
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -272,7 +276,75 @@ async def store_data(
             error_detail = error_detail[:200] + "..."
         raise HTTPException(500, detail=error_detail)
 
+@app.post("/rules/{file_name}/{column_name}/add-rule")
+async def add_rule_endpoint(
+    rule_update: SingleRuleUpdate,
+    file_name: str = Path(..., description="Name of the file"),
+    column_name: str = Path(..., description="Name of the column")
+):
+    """Add or edit a single rule for a column via UI (+ symbol). User can input a new rule like 'This column should always start with capital letters'."""
+    try:
+        file_rules_dir = os.path.join('rules', file_name.replace('.', '_'))
+        updated_rules = add_rule(file_rules_dir, column_name, rule_update.rule)
+        return {
+            "status": "success",
+            "message": f"Rule added/edited for column {column_name}",
+            "rules": updated_rules
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error adding/editing rule: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
+@app.delete("/rules/{file_name}/{column_name}/delete-rule/{rule_index}")
+async def delete_rule_endpoint(
+    file_name: str = Path(..., description="Name of the file"),
+    column_name: str = Path(..., description="Name of the column"),
+    rule_index: int = Path(..., description="Index of the rule to delete")
+):
+    """Delete a single rule for a column via UI (delete icon). Removes the rule from the rules file."""
+    try:
+        file_rules_dir = os.path.join('rules', file_name.replace('.', '_'))
+        result = delete_rule(file_rules_dir, column_name, rule_index)
+        return {
+            "status": "success",
+            "message": f"Rule deleted for column {column_name}",
+            "deleted_rule": result["deleted_rule"],
+            "rules": result["rules"]
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error deleting rule: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/rules/{file_name}/{column_name}")
+async def get_rules(
+    file_name: str = Path(..., description="Name of the file"),
+    column_name: str = Path(..., description="Name of the column")
+):
+    """Get current rules for a column to display in UI (with + and delete icons)."""
+    try:
+        file_rules_dir = os.path.join('rules', file_name.replace('.', '_'))
+        rules = load_rules(file_rules_dir, column_name)
+        # Format for UI with add/delete indicators
+        formatted_rules = [
+            {"rule": rule, "add_icon": "+", "delete_icon": f"delete_{i}"}
+            for i, rule in enumerate(rules["rules"])
+        ]
+        return {
+            "status": "success",
+            "rules": formatted_rules,
+            "metadata": {
+                "type": rules["type"],
+                "dq_dimensions": rules["dq_dimensions"],
+                "statistics": rules["statistics"]
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error fetching rules: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/invalid-data/{selected_option}/{container_name}/{file_name}")
 def generate_invalid_data_queries(selected_option: str, container_name: str, file_name: str):
@@ -363,148 +435,42 @@ def execute_stored_queries(container_name: str, file_name: str):
         detailed_error = f"Query execution error for {file_name}: {str(e)}"
         logger.error(detailed_error)
         raise HTTPException(500, detail=detailed_error)
-# @app.get("/table-schema/{table_name}")
-# async def get_table_schema(table_name: str):
-#     try:
-#         db_manager = DynamicTableManager()
-#         schema = db_manager.get_table_schema(table_name)
-#         return JSONResponse(content=schema)
-#     except DatabaseError as e:
-#         logger.error(f"Database error in get_table_schema: {str(e)}")
-#         raise HTTPException(status_code=500, detail=str(e))
-#     except Exception as e:
-#         logger.error(f"Error in get_table_schema: {str(e)}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# @app.post("/storage/{selected_option}/{container_name}/{file_name}")
-# async def process_file(
-#     selected_option: str,
-#     container_name: str,
-#     file_name: str,
-#     file: Optional[UploadFile] = File(None)
-# ):
-#     """Process selected file and analyze its headers"""
-#     logger.debug(f"Processing file from {selected_option}/{container_name}/{file_name}")
-#     try:
-#         file_content = None
-        
-#         # Get file content based on storage type
-#         if selected_option == "aws":
-#             file_content = read_s3_file(container_name, file_name)
-#         elif selected_option == "azure":
-#             file_content = read_azure_file(container_name, file_name)
-#         elif selected_option == "local" and file:
-#             file_content = await file.read()
-#             file_content = file_content.decode("utf-8")
-#         else:
-#             raise HTTPException(
-#                 status_code=400,
-#                 detail="Invalid storage option or missing file"
-#             )
-
-#         if not file_content:
-#             raise HTTPException(
-#                 status_code=500,
-#                 detail="No file content was retrieved"
-#             )
-
-#         # Enhanced header detection
-#         has_headers = detect_headers(file_content)
-#         logger.debug(f"File has headers: {has_headers}")
-
-#         if has_headers:
-#             df = pd.read_csv(io.StringIO(file_content))
-#             column_info = {str(i): col for i, col in enumerate(df.columns)}
-#             generated = False
-#             logger.debug("Using existing headers")
-#         else:
-#             logger.debug("No headers detected, generating using LLM")
-#             column_info = column_name_gen(file_content)
-#             generated = True
-
-#         # Generate DQ rules
-#         dq_rules = generate_dq_rules(file_content, column_info)
-        
-#         # Create rules directory if it doesn't exist
-#         os.makedirs('rules', exist_ok=True)
-        
-#         # Store rules for each column
-#         for column_name, rules in dq_rules.items():
-#             rule_file_path = os.path.join('rules', f'{column_name}_rules.json')
-#             with open(rule_file_path, 'w') as f:
-#                 json.dump(rules, f, indent=2)
-
-#         return JSONResponse(content={
-#             "status": "success",
-#             "has_headers": has_headers,
-#             "headers_generated": generated,
-#             "column_info": column_info,
-#             "dq_rules": dq_rules
-#         })
-
-#     except Exception as e:
-#         logger.error(f"Error: {str(e)}")
-#         raise HTTPException(status_code=500, detail=str(e))
-
-# Replace the validate-data endpoint with this updated version
-@app.post("/validate-data/{selected_option}/{container_name}/{file_name}")
-async def validate_and_correct_data(
-    selected_option: str,
-    container_name: str,
-    file_name: str,
-    file: Optional[UploadFile] = File(None),
-    column_selection: str = Form(...)
-):
-    logger.debug(f"Validating data from {selected_option}/{container_name}/{file_name}")
     
+@app.post("/validate-data/{container_name}/{file_name}")
+async def validate_data(container_name: str, file_name: str):
+    """Read, pivot invalid records, correct them with LLM, and return refactored results."""
     try:
-        column_selection_data = json.loads(column_selection)
-        selected_columns = column_selection_data.get('selected_columns', [])
-        if not selected_columns or not isinstance(selected_columns, list):
-            raise HTTPException(status_code=400, detail="Invalid column_selection format")
-
-        file_content = None
-        if selected_option == "aws":
-            file_content = await read_s3_file(container_name, file_name)
-        elif selected_option == "azure":
-            file_content = await read_azure_file(container_name, file_name)
-        elif selected_option == "local" and file:
-            file_content = await file.read()
-            file_content = file_content.decode("utf-8")
-        else:
-            raise HTTPException(status_code=400, detail="Invalid storage option or missing file")
-
-        if not file_content:
-            raise HTTPException(status_code=500, detail="No file content was retrieved")
-
-        has_headers = detect_headers(file_content)
+        file_base_name = file_name.split('.')[0].lower()
+        table_name = f"data_{file_base_name.replace('-', '_')}"
+        tracker = QueryTracker(output_dir=f"query_logs/{file_base_name}")
         
-        df = pd.read_csv(io.StringIO(file_content))
-        if not has_headers:
-            column_mapping = column_name_gen(file_content)
-            df.columns = [column_mapping[str(i)] for i in range(len(df.columns))]
-        else:
-            column_mapping = {str(i): col for i, col in enumerate(df.columns)}
-
-        processor = DataStreamProcessor()
-        corrected_data, modifications = await processor.process_data(df, selected_columns)
-        
-        
-        # Clean the DataFrame for JSON serialization
-        corrected_dict = corrected_data.replace([np.inf, -np.inf], None).where(pd.notnull(corrected_data), None).to_dict(orient='records')
-        
-        return {
-            "status": "success",
-            "has_headers": has_headers,
-            "column_mapping": column_mapping,
-            "corrected_data": corrected_dict,
-            "modifications": modifications
-        }
-
-    except Exception as e:
-        logger.error(f"Error: {str(e)}")
-        raise HTTPException(status_code=500, detail=str(e))
+        async with DataValidator(table_name, container_name, file_name) as validator:
+            start_time = time.time()
+            pivoted_data = validator.read_and_pivot_invalid_records()
+            corrected_data = await validator.correct_invalid_records(pivoted_data)
+            
+            results = {
+                "pivoted_data": pivoted_data,
+                "successful_validation": corrected_data,  # Now has corrected/uncorrectable/nochange with summary
+                "execution_logs": [],
+                "execution_time": f"{time.time() - start_time:.2f} seconds"
+            }
+            
+            log_path = tracker.output_dir / "query_generation.log"
+            if log_path.exists():
+                with open(log_path, 'r') as f:
+                    results['execution_logs'] = f.readlines()
+            
+            return JSONResponse({"status": "success", "results": results})
     
+    except Exception as e:
+        detailed_error = f"Data validation error for {file_name}: {str(e)}"
+        logger.error(detailed_error)
+        raise HTTPException(500, detail=detailed_error)
+
 if __name__ == "__main__":
+    import nest_asyncio
     import uvicorn
+    logging.basicConfig(level=logging.DEBUG)
+    nest_asyncio.apply()  # Allow running async in Jupyter/IPython if needed
     uvicorn.run(app, host="0.0.0.0", port=8000)

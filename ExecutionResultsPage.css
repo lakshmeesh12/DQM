@@ -1,0 +1,349 @@
+/* ExecutionResultsPage.css */
+.execution-results-page {
+    padding: 40px;
+    max-width: 1440px;
+    margin: 0 auto;
+    background: #ffffff; /* White background */
+    min-height: 100vh;
+    color: #333333;
+    font-family: 'Roboto', sans-serif;
+    position: relative; /* For absolute positioning of logo */
+  }
+  
+  /* Header */
+  .page-header {
+    display: flex;
+    justify-content: flex-end; /* Push content to the right */
+    align-items: flex-start; /* Align items to the top */
+    margin-bottom: 40px;
+    position: relative;
+  }
+  
+  .logo {
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 120px; /* Slightly larger logo */
+    height: auto;
+  }
+  
+  .header-content {
+    display: flex;
+    flex-direction: column; /* Stack title and button vertically */
+    align-items: flex-end; /* Align content to the right */
+    gap: 10px;
+  }
+  
+  .page-title {
+    font-size: 32px;
+    color: #6405c2; /* Blue from Quantant logo */
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 2.5px;
+    margin: 0; /* Remove default margin */
+  }
+  
+  .back-button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    background: #6405c2; /* Blue from Quantant logo */
+    color: #ffffff;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.3s ease, transform 0.2s ease;
+  }
+  
+  .back-button:hover {
+    background: #6405c2; /* Darker blue for hover */
+    transform: translateX(-2px);
+  }
+  
+  .back-button svg {
+    stroke: #ffffff;
+  }
+  
+  /* Results Container */
+  .results-container {
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+  }
+  
+  /* Execution Section */
+  .execution-section {
+    background: #f9f9f9; /* Light gray background */
+    border-radius: 12px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    padding: 25px;
+    border: 2px solid #6405c2; /* Blue border */
+    transition: all 0.3s ease-in-out;
+  }
+  
+  .execution-section:hover {
+    box-shadow: 0 8px 25px rgba(0, 102, 204, 0.2); /* Blue shadow */
+    transform: scale(1.01);
+  }
+  
+  .execution-section h3 {
+    margin: 0 0 20px;
+    font-size: 22px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    color: #6405c2; /* Blue accent */
+    border-bottom: 2px solid rgba(0, 102, 204, 0.4);
+    padding-bottom: 10px;
+  }
+  
+  /* Invalid Data Table */
+  .invalid-data-table {
+    width: 100%;
+    overflow-x: auto;
+  }
+  
+  .invalid-data-table table {
+    width: 100%;
+    border-collapse: collapse;
+    background: #ffffff; /* White table background */
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+  }
+  
+  .invalid-data-table th,
+  .invalid-data-table td {
+    padding: 15px 20px;
+    text-align: left;
+    border-bottom: 1px solid rgba(0, 102, 204, 0.2); /* Blue border */
+  }
+  
+  .invalid-data-table th {
+    background: #6405c2; /* Blue header from Quantant logo */
+    color: #ffffff;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1.2px;
+    font-size: 14px;
+  }
+  
+  .invalid-data-table td {
+    color: #1a1a1a; /* Bright, dark text */
+    font-size: 14px;
+    font-family: 'Fira Code', 'Courier New', monospace; /* Monospace for data */
+  }
+  
+  .invalid-data-table tr:last-child td {
+    border-bottom: none;
+  }
+  
+  .invalid-data-table tr:hover {
+    background: rgba(0, 102, 204, 0.1); /* Light blue hover effect */
+    transition: background 0.2s ease;
+  }
+  
+  /* Add Rule Section */
+  .add-rule-section {
+    margin-top: 20px;
+    text-align: center;
+    padding: 15px;
+    border-top: 1px solid rgba(0, 102, 204, 0.2); /* Blue separator */
+  }
+  
+  .add-rule-prompt {
+    color: #6405c2; /* Blue text */
+    font-size: 16px;
+    font-weight: 500;
+    margin-bottom: 10px;
+  }
+  
+  .add-rule-button {
+    padding: 10px 20px;
+    background: #6405c2; /* Blue button */
+    color: #ffffff;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.3s ease, transform 0.2s ease;
+  }
+  
+  .add-rule-button:hover {
+    background: #6405c2; /* Darker blue hover */
+    transform: scale(1.05);
+  }
+  
+  /* Rule Editor */
+  .rule-editor {
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+    max-width: 600px;
+    margin: 0 auto;
+  }
+  
+  .column-select {
+    padding: 10px;
+    border: 1px solid #6405c2;
+    border-radius: 6px;
+    font-size: 14px;
+    color: #1a1a1a;
+    background: #ffffff;
+    cursor: pointer;
+    transition: border-color 0.3s ease;
+  }
+  
+  .column-select:hover,
+  .column-select:focus {
+    border-color: #6405c2;
+    outline: none;
+  }
+  
+  .rule-textarea {
+    padding: 10px;
+    border: 1px solid #6405c2;
+    border-radius: 6px;
+    font-size: 14px;
+    color: #1a1a1a;
+    background: #ffffff;
+    resize: vertical;
+    min-height: 80px;
+    font-family: 'Roboto', sans-serif;
+    transition: border-color 0.3s ease;
+  }
+  
+  .rule-textarea:hover,
+  .rule-textarea:focus {
+    border-color: #6405c2;
+    outline: none;
+  }
+  
+  .rule-editor-buttons {
+    display: flex;
+    gap: 10px;
+    justify-content: center;
+  }
+  
+  .save-rule-button,
+  .cancel-rule-button {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.3s ease, transform 0.2s ease;
+  }
+  
+  .save-rule-button {
+    background: #6405c2; /* Blue */
+    color: #ffffff;
+  }
+  
+  .save-rule-button:hover {
+    background: #6405c2; /* Darker blue */
+    transform: scale(1.05);
+  }
+  
+  .save-rule-button:disabled {
+    background: #cccccc;
+    cursor: not-allowed;
+    transform: none;
+  }
+  
+  .cancel-rule-button {
+    background: #e0e0e0; /* Light gray */
+    color: #333333;
+  }
+  
+  .cancel-rule-button:hover {
+    background: #d1d1d1;
+    transform: scale(1.05);
+  }
+  
+  .cancel-rule-button:disabled {
+    background: #cccccc;
+    cursor: not-allowed;
+    transform: none;
+  }
+  
+  /* No Data State */
+  .no-results-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 80vh;
+  }
+  
+  .no-results {
+    color: #666666;
+    font-size: 18px;
+    text-align: center;
+    padding: 30px;
+    background: #f9f9f9;
+    border-radius: 10px;
+    border: 1px solid #6405c2; /* Blue border */
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+  }
+  
+  .no-data {
+    color: #666666;
+    font-size: 15px;
+    font-style: italic;
+    margin-top: 10px;
+  }
+  
+  /* Responsive Design */
+  @media (max-width: 768px) {
+    .execution-results-page {
+      padding: 20px;
+    }
+  
+    .page-title {
+      font-size: 24px;
+    }
+  
+    .execution-section {
+      padding: 15px;
+    }
+  
+    .invalid-data-table th,
+    .invalid-data-table td {
+      padding: 10px 15px;
+      font-size: 13px;
+    }
+  
+    .back-button {
+      padding: 8px 16px;
+      font-size: 14px;
+    }
+  
+    .logo {
+      width: 100px; /* Slightly smaller on mobile */
+    }
+  
+    .header-content {
+      gap: 8px;
+    }
+  
+    .add-rule-section {
+      padding: 10px;
+    }
+  
+    .rule-editor {
+      max-width: 100%;
+    }
+  
+    .save-rule-button,
+    .cancel-rule-button,
+    .add-rule-button {
+      padding: 8px 16px;
+      font-size: 13px;
+    }
+  }

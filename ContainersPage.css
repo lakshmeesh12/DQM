@@ -1,0 +1,263 @@
+/* src/styles/ContainersPage.css */
+
+/* Containers Page Styles */
+.containers-page {
+  max-width: 800px;
+  margin: 40px auto;
+  padding: 20px;
+  border-radius: 12px;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+  transition: all 1.5s ease-in-out; /* Smooth transition for background change */
+  position: relative;
+  z-index: 1;
+  opacity: 0; /* Start with fade-in */
+}
+
+.containers-page.loaded {
+  opacity: 1; /* Fade in after loading */
+}
+
+.containers-page.content-hidden::before,
+.containers-page.content-hidden::after {
+  display: none; /* Hide background during loading to prevent glitches */
+}
+
+/* Container content with dynamic background */
+.container-content {
+  position: relative;
+  width: 100%;
+  transition: all 0.3s ease; /* Smooth transitions for box expansion */
+  background: #ffffff; /* Default white background if no image */
+  z-index: 0; /* Ensure content stays above background */
+}
+
+.container-content.expanded {
+  background: transparent; /* Transparent when expanded to show background */
+}
+
+.container-content.loading-glitch {
+  animation: glitch 2s linear infinite; /* Glitch effect during loading */
+}
+
+@keyframes glitch {
+  2%, 64% { transform: translate(2px, 0) skew(0deg); }
+  4%, 60% { transform: translate(-2px, 0) skew(0deg); }
+  62% { transform: translate(0, 0) skew(5deg); }
+}
+
+.container-content::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-size: 200px auto; /* Reduced width to fit within the box (adjust as needed) */
+  background-position: center;
+  background-repeat: no-repeat;
+  backdrop-filter: blur(15px); /* Blurry background image only */
+  opacity: 0.3; /* Reduced opacity to ensure text remains readable */
+  z-index: -1; /* Behind the content */
+  transition: background-size 1.5s ease-in-out, opacity 0.5s ease-in-out; /* Match flip duration and add fade-in */
+}
+
+.container-content.expanded::before {
+  background-size: 300px auto; /* Slightly larger when expanded to maintain visibility (adjust as needed) */
+  opacity: 0.3; /* Keep opacity low for readability */
+}
+
+.container-content.loading-glitch::before {
+  display: none; /* Hide background during loading glitch */
+}
+
+/* Headings */
+h2 {
+  font-size: 28px;
+  color: #1a202c;
+  text-align: center;
+  margin-bottom: 24px;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  font-family: 'Roboto', sans-serif;
+  font-weight: 700;
+}
+
+h3 {
+  font-size: 20px;
+  color: #2d3748;
+  margin-bottom: 16px;
+  font-family: 'Roboto', sans-serif;
+  font-weight: 600;
+}
+
+/* Container and File Selection Grids */
+.container-selection,
+.file-selection {
+  background: #ffffff; /* Clear background, no blur */
+  padding: 20px;
+  border-radius: 12px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  margin-bottom: 24px;
+  transition: transform 0.3s ease, box-shadow 0.3s ease, background 0.3s ease;
+  z-index: 2; /* Ensure content stays above background */
+}
+
+.container-selection:hover,
+.file-selection:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.1);
+  background: #ffffff; /* Full opacity on hover for contrast */
+}
+
+.container-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.container-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: #ffffff; /* Clear background, no blur */
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  transition: all 0.3s ease;
+  overflow: hidden;
+  z-index: 2; /* Ensure cards stay above background */
+}
+
+.container-card:hover:not(.selected) {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+  background: #ffffff; /* Full opacity on hover for contrast */
+}
+
+.container-card.selected {
+  border: none;
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
+  transform: scale(1.05);
+  background: #4a90e2; /* Solid color for selected, no blur */
+}
+
+.container-card span {
+  font-size: 18px;
+  color: #1a202c;
+  font-family: 'Roboto', sans-serif;
+  font-weight: 500;
+  transition: color 0.3s ease;
+}
+
+.container-card span:nth-child(2) {
+  font-size: 14px;
+  color: #a0aec0;
+  font-weight: 400;
+}
+
+.container-card.selected span {
+  color: #ffffff;
+}
+
+.container-card input[type="checkbox"] {
+  display: none; /* Hidden for custom styling */
+}
+
+.container-card::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(45deg, rgba(59, 130, 246, 0.1), rgba(147, 51, 234, 0.1));
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+
+.container-card:hover::before {
+  opacity: 1;
+}
+
+.container-card.selected::before {
+  opacity: 0.5;
+}
+
+.container-card .animate-pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.6; }
+}
+
+/* Buttons */
+.primary-button {
+  display: block;
+  width: 100%;
+  padding: 14px;
+  background: linear-gradient(45deg, #4a90e2, #9013fe);
+  color: white;
+  font-size: 18px;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 12px rgba(74, 144, 226, 0.3);
+  font-family: 'Roboto', sans-serif;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.primary-button:hover:not(:disabled) {
+  background: linear-gradient(45deg, #357abd, #7d10e3);
+  box-shadow: 0 6px 16px rgba(74, 144, 226, 0.5);
+  transform: translateY(-2px);
+}
+
+.primary-button:disabled {
+  background: #cccccc;
+  cursor: not-allowed;
+  box-shadow: none;
+  opacity: 0.7;
+}
+
+/* Loading overlay */
+.background-loading-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 1000;
+}
+
+.glitch-text {
+  color: #fff;
+  font-size: 24px;
+  font-family: 'Roboto', sans-serif;
+  text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+  animation: glitch 2s linear infinite;
+}
+
+/* Loading and Error Styles (already in global.css, but included for completeness) */
+.loading, .error {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  font-size: 20px;
+  color: #1a202c;
+  font-family: 'Roboto', sans-serif;
+}
+
+.error {
+  color: #e53e3e;
+}

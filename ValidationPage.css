@@ -1,0 +1,63 @@
+/* src/styles/ValidationPage.css */
+
+/* Validation Page Styles */
+.validation-page {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+    font-family: Arial, sans-serif;
+  }
+  
+  .validation-results {
+    margin-top: 20px;
+    background: white;
+    padding: 15px;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  }
+  
+  .validation-results h3 {
+    margin-top: 0;
+    font-size: 18px;
+    color: #333;
+  }
+  
+  .validation-results ul {
+    list-style-type: disc;
+    padding-left: 20px;
+  }
+  
+  .validation-results li {
+    margin-bottom: 10px;
+    font-size: 16px;
+    color: #666;
+  }
+  
+  .actions {
+    margin-top: 20px;
+    display: flex;
+    gap: 10px;
+  }
+  
+  .primary-button, .secondary-button {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 16px;
+  }
+  
+  .primary-button {
+    background-color: #6a11cb;
+    color: white;
+  }
+  
+  .secondary-button {
+    background-color: #ddd;
+    color: #333;
+  }
+  
+  .primary-button:disabled {
+    background-color: #ccc;
+    cursor: not-allowed;
+  }

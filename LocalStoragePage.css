@@ -1,0 +1,70 @@
+/* src/styles/LocalStoragePage.css */
+
+/* Local Storage Page Styles */
+.local-storage-page {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 20px;
+  }
+  
+  .file-upload {
+    margin-bottom: 20px;
+  }
+  
+  .file-upload h3 {
+    margin-bottom: 10px;
+    font-size: 18px;
+    color: #333;
+  }
+  
+  .local-files {
+    margin-top: 20px;
+  }
+  
+  .local-files h3 {
+    margin-bottom: 10px;
+    font-size: 18px;
+    color: #333;
+  }
+  
+  .local-files ul {
+    list-style-type: none;
+    padding: 0;
+  }
+  
+  .local-files li {
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  
+  .local-files label {
+    flex: 1;
+  }
+  
+  .view-content-button {
+    background-color: #6c757d;
+    color: white;
+    border: none;
+    padding: 5px 10px;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  
+  .no-files {
+    text-align: center;
+    color: #666;
+  }
+  
+  .no-files p {
+    margin: 20px 0;
+    font-size: 16px;
+  }
+  
+  .success {
+    color: #28a745;
+    margin-top: 10px;
+    font-size: 16px;
+  }

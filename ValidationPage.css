@@ -1,63 +1,479 @@
-/* src/styles/ValidationPage.css */
+/* ValidationResultsPage.css */
+.validation-results-page {
+  padding: 40px;
+  max-width: 1440px;
+  margin: 0 auto;
+  background: #ffffff;
+  min-height: 100vh;
+  color: #333333;
+  font-family: 'Roboto', sans-serif;
+  position: relative;
+}
 
-/* Validation Page Styles */
-.validation-page {
-    max-width: 1200px;
-    margin: 0 auto;
+/* Header */
+.page-header {
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-start;
+  margin-bottom: 40px;
+  position: relative;
+}
+
+.logo {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 120px;
+  height: auto;
+}
+
+.header-content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.header-actions {
+  display: flex;
+  flex-wrap: wrap; /* Allow wrapping for smaller screens */
+  gap: 15px;
+}
+
+.page-title {
+  font-size: 32px;
+  color: #0066cc;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 2.5px;
+  margin: 0;
+}
+
+.back-button,
+.download-button,
+.upload-source-button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  background: #0066cc;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.3s ease, transform 0.2s ease;
+}
+
+.back-button:hover,
+.download-button:hover,
+.upload-source-button:hover {
+  background: #004d99;
+  transform: scale(1.05);
+}
+
+.back-button svg {
+  stroke: #ffffff;
+}
+
+/* Upload Editor */
+.upload-editor {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 10px;
+}
+
+.filename-input {
+  padding: 8px;
+  border: 1px solid #0066cc;
+  border-radius: 6px;
+  font-size: 14px;
+  color: #1a1a1a;
+  background: #ffffff;
+  width: 250px; /* Fixed width for consistency */
+  transition: border-color 0.3s ease;
+}
+
+.filename-input:hover,
+.filename-input:focus {
+  border-color: #004d99;
+  outline: none;
+}
+
+.upload-button {
+  padding: 10px 20px;
+  background: #0066cc;
+  color: #ffffff;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.3s ease, transform 0.2s ease;
+}
+
+.upload-button:hover {
+  background: #004d99;
+  transform: scale(1.05);
+}
+
+.upload-button:disabled {
+  background: #cccccc;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Results Container */
+.results-container {
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+}
+
+/* Corrected Dataset Section */
+.corrected-dataset-section {
+  background: #f9f9f9;
+  border-radius: 12px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+  padding: 25px;
+  border: 2px solid #0066cc;
+  transition: all 0.3s ease-in-out;
+}
+
+.corrected-dataset-section:hover {
+  box-shadow: 0 8px 25px rgba(0, 102, 204, 0.2);
+  transform: none;
+}
+
+.corrected-dataset-section h3 {
+  margin: 0 0 20px;
+  font-size: 22px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: #0066cc;
+  border-bottom: 2px solid rgba(0, 102, 204, 0.4);
+  padding-bottom: 10px;
+}
+
+/* Corrected Dataset Table */
+.corrected-dataset-table {
+  width: 100%;
+  overflow-x: auto; /* Enables horizontal scrolling */
+  max-height: 500px;
+  overflow-y: auto; /* Vertical scrolling if needed */
+  -webkit-overflow-scrolling: touch; /* Smooth scrolling on touch devices */
+  scrollbar-width: thin; /* Thinner scrollbar (Firefox) */
+  scrollbar-color: #0066cc #e6e6e6; /* Custom scrollbar color (Firefox) */
+}
+
+.corrected-dataset-table::-webkit-scrollbar {
+  height: 8px; /* Thinner horizontal scrollbar (Chrome/Safari) */
+}
+
+.corrected-dataset-table::-webkit-scrollbar-track {
+  background: #e6e6e6;
+}
+
+.corrected-dataset-table::-webkit-scrollbar-thumb {
+  background: #0066cc;
+  border-radius: 4px;
+}
+
+.corrected-dataset-table::-webkit-scrollbar-thumb:hover {
+  background: #004d99;
+}
+
+.corrected-dataset-table table {
+  width: 100%;
+  min-width: 1000px; /* Forces horizontal scroll if content exceeds viewport */
+  border-collapse: collapse;
+  background: #ffffff;
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
+  table-layout: auto; /* Allows columns to size based on content */
+}
+
+.corrected-dataset-table th,
+.corrected-dataset-table td {
+  padding: 12px 15px;
+  text-align: left;
+  border-bottom: 1px solid rgba(0, 102, 204, 0.2);
+  font-size: 14px;
+  white-space: nowrap; /* Prevents text wrapping */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px; /* Limits column width, adjust as needed */
+}
+
+.corrected-dataset-table th {
+  background: #0066cc;
+  color: #ffffff;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1.2px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.corrected-dataset-table td {
+  color: #1a1a1a;
+  font-family: 'Fira Code', 'Courier New', monospace;
+}
+
+.corrected-dataset-table tr:last-child td {
+  border-bottom: none;
+}
+
+.corrected-dataset-table tr:hover {
+  background: rgba(0, 102, 204, 0.1);
+  transition: none;
+}
+
+/* Validation Section */
+.validation-section {
+  background: #f9f9f9;
+  border-radius: 12px;
+  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+  padding: 25px;
+  border: 2px solid #0066cc;
+  transition: all 0.3s ease-in-out;
+}
+
+.validation-section:hover {
+  box-shadow: 0 8px 25px rgba(0, 102, 204, 0.2);
+  transform: none;
+}
+
+.validation-section h3 {
+  margin: 0 0 20px;
+  font-size: 22px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  color: #0066cc;
+  border-bottom: 2px solid rgba(0, 102, 204, 0.4);
+  padding-bottom: 10px;
+}
+
+/* Column Validation */
+.column-validation {
+  margin-bottom: 20px;
+}
+
+.column-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #0066cc;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 10px;
+}
+
+/* Validation Table (Multiple Tables in Successful Validations) */
+.validation-table {
+  width: 100%;
+  overflow-x: auto; /* Enables horizontal scrolling for each table */
+  max-height: 400px;
+  overflow-y: auto; /* Vertical scrolling if needed */
+  -webkit-overflow-scrolling: touch; /* Smooth scrolling on touch devices */
+  scrollbar-width: thin; /* Thinner scrollbar (Firefox) */
+  scrollbar-color: #0066cc #e6e6e6; /* Custom scrollbar color (Firefox) */
+  margin-bottom: 15px; /* Space between tables */
+}
+
+.validation-table::-webkit-scrollbar {
+  height: 8px; /* Thinner horizontal scrollbar (Chrome/Safari) */
+}
+
+.validation-table::-webkit-scrollbar-track {
+  background: #e6e6e6;
+}
+
+.validation-table::-webkit-scrollbar-thumb {
+  background: #0066cc;
+  border-radius: 4px;
+}
+
+.validation-table::-webkit-scrollbar-thumb:hover {
+  background: #004d99;
+}
+
+.validation-table table {
+  width: 100%;
+  min-width: 800px; /* Forces horizontal scroll for each table */
+  border-collapse: collapse;
+  background: #ffffff;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+  table-layout: auto; /* Allows columns to size based on content */
+}
+
+.validation-table th,
+.validation-table td {
+  padding: 8px 12px;
+  text-align: left;
+  border-bottom: 1px solid rgba(0, 102, 204, 0.2);
+  font-size: 12px;
+  white-space: nowrap; /* Prevents text wrapping */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px; /* Limits column width, adjust as needed */
+}
+
+.validation-table th {
+  background: #0066cc;
+  color: #ffffff;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.validation-table td {
+  color: #1a1a1a;
+  font-family: 'Fira Code', 'Courier New', monospace;
+}
+
+.validation-table tr:last-child td {
+  border-bottom: none;
+}
+
+.validation-table tr:hover {
+  background: rgba(0, 102, 204, 0.1);
+  transition: none;
+}
+
+/* Validation Summary */
+.validation-summary {
+  margin-top: 10px;
+  padding: 8px;
+  background: rgba(0, 102, 204, 0.05);
+  border-radius: 4px;
+  display: flex;
+  gap: 15px;
+  justify-content: flex-start;
+}
+
+.validation-summary p {
+  margin: 0;
+  font-size: 12px;
+  color: #0066cc;
+  font-weight: 500;
+}
+
+/* No Data State */
+.no-results-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 80vh;
+}
+
+.no-results {
+  color: #666666;
+  font-size: 18px;
+  text-align: center;
+  padding: 30px;
+  background: #f9f9f9;
+  border-radius: 10px;
+  border: 1px solid #0066cc;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+}
+
+.no-data {
+  color: #666666;
+  font-size: 15px;
+  font-style: italic;
+  margin-top: 10px;
+}
+
+/* Add smoother scrolling for the entire page */
+html, body {
+  scroll-behavior: smooth;
+  overflow-x: hidden;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+  .validation-results-page {
     padding: 20px;
-    font-family: Arial, sans-serif;
   }
-  
-  .validation-results {
-    margin-top: 20px;
-    background: white;
+
+  .page-title {
+    font-size: 24px;
+  }
+
+  .validation-section,
+  .corrected-dataset-section {
     padding: 15px;
-    border-radius: 8px;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
   }
-  
-  .validation-results h3 {
-    margin-top: 0;
-    font-size: 18px;
-    color: #333;
+
+  .validation-table th,
+  .validation-table td {
+    padding: 6px 10px;
+    font-size: 11px;
   }
-  
-  .validation-results ul {
-    list-style-type: disc;
-    padding-left: 20px;
+
+  .corrected-dataset-table th,
+  .corrected-dataset-table td {
+    padding: 8px 12px;
+    font-size: 13px;
   }
-  
-  .validation-results li {
-    margin-bottom: 10px;
-    font-size: 16px;
-    color: #666;
+
+  .column-title {
+    font-size: 14px;
   }
-  
-  .actions {
-    margin-top: 20px;
-    display: flex;
+
+  .validation-summary p {
+    font-size: 11px;
+  }
+
+  .back-button,
+  .download-button,
+  .upload-source-button {
+    padding: 8px 16px;
+    font-size: 14px;
+  }
+
+  .upload-editor {
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+  }
+
+  .filename-input {
+    width: 100%;
+    font-size: 13px;
+  }
+
+  .upload-button {
+    padding: 8px 16px;
+    font-size: 13px;
+  }
+
+  .logo {
+    width: 100px;
+  }
+
+  .header-actions {
     gap: 10px;
   }
-  
-  .primary-button, .secondary-button {
-    padding: 10px 20px;
-    border: none;
-    border-radius: 5px;
-    cursor: pointer;
-    font-size: 16px;
+
+  /* Ensure tables remain scrollable on smaller screens */
+  .corrected-dataset-table table {
+    min-width: 800px; /* Adjusted for smaller screens */
   }
-  
-  .primary-button {
-    background-color: #6a11cb;
-    color: white;
+
+  .validation-table table {
+    min-width: 600px; /* Adjusted for smaller screens */
   }
-  
-  .secondary-button {
-    background-color: #ddd;
-    color: #333;
-  }
-  
-  .primary-button:disabled {
-    background-color: #ccc;
-    cursor: not-allowed;
-  }
+}

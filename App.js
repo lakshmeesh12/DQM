@@ -15,7 +15,8 @@ import {
   deleteRule,
   fetchRulesFromDirectory,
   generateInvalidDataQueries,
-  executeStoredQueries
+  executeStoredQueries,
+  uploadCorrectedDataset
 } from './api/api'; // For API calls, including fetchRulesFromDirectory
 import './styles/global.css'; // Import global styles
 import './styles/HomePage.css'; // Import HomePage styles
@@ -26,6 +27,7 @@ import './styles/ValidationPage.css';
 import './styles/QueryResultsPage.css';
 import './styles/ExecutionResultsPage.css';
 import { useParams } from 'react-router-dom';
+import LoadingOverlay from './api/LoadingOverlay';
 import { 
   BarChart, 
   Bar, 
@@ -43,9 +45,17 @@ function Header() {
       <nav className="home-link">
         <Link to="/">Home</Link>
       </nav>
+      <div className="logo-container">
+        <img
+          src="/images/logo.png" // Relative path to public/images/logo.png
+          alt="Company Logo"
+          className="header-logo"
+        />
+      </div>
     </div>
   );
 }
+ 
 
 // Helper function to get the logo for each storage option (unchanged)
 function getLogoForStorage(option) {
@@ -55,105 +65,118 @@ function getLogoForStorage(option) {
     case "aws":
       return "https://upload.wikimedia.org/wikipedia/commons/9/93/Amazon_Web_Services_Logo.svg";
     case "local":
-      return "https://cdn-icons-png.flaticon.com/512/484/484613.png"; // Example local storage icon
+      return "https://cdn-icons-png.flaticon.com/512/484/484613.png";
+    case "postgresql":
+      return "https://upload.wikimedia.org/wikipedia/commons/2/29/Postgresql_elephant.svg";
+    case "mysql":
+      return "https://www.mysql.com/common/logos/logo-mysql-170x115.png";
+    case "googledrive":
+      return "https://upload.wikimedia.org/wikipedia/commons/d/da/Google_Drive_logo.png";
+    case "snowflake":
+      return "https://upload.wikimedia.org/wikipedia/commons/f/ff/Snowflake_Logo.svg";
+    case "gcp":
+        return "https://cdn.creazilla.com/icons/3253833/google-cloud-icon-sm.png";
+    case "onedrive":
+        return "https://auburn.service-now.com/onedrive_logo_icon-Recovered_med.pngx";
     default:
+      console.warn(`No logo found for: ${option}`);
       return "";
   }
 }
-
-// Updated HomePage Component (unchanged)
-// In HomePage (lines 46-83), change this:
-function HomePage({ 
-  setSelectedOption, 
-  setSelectedContainer, 
-  setSelectedFileForRules, 
-  setSelectedColumns, 
-  setLocalFiles, 
-  setSelectedFile 
+ 
+// Updated HomePage Component (simplified with debug logs)
+function HomePage({
+  setSelectedOption,
+  setSelectedContainer,
+  setSelectedFileForRules,
+  setSelectedColumns,
+  setLocalFiles,
+  setSelectedFile
 }) {
-  const [storageOptions, setStorageOptions] = useState([]);
-  const [error, setError] = useState(null);
-  const [selectedStorage, setSelectedStorage] = useState(null); // Track selected storage option
-  const [containersFetched, setContainersFetched] = useState(false); // Track if containers are retrieved
-  const [isFlipping, setIsFlipping] = useState(false); // Track flip animation state
+  const allStorageOptions = [
+    "azure",
+    "aws",
+    "local",
+    "postgresql",
+    "mysql",
+    "googledrive",
+    "snowflake",
+    "gcp",
+    "onedrive"
+  ];
+  const functionalOptions = ["azure", "aws", "local"];
+  const [selectedStorage, setSelectedStorage] = useState(null);
+  const [isFlipping, setIsFlipping] = useState(false);
   const navigate = useNavigate();
-
-  // Fetch storage options on component mount
-  useEffect(() => {
-    fetchStorageOptions()
-      .then((data) => {
-        setStorageOptions(data.options);
-      })
-      .catch((error) => {
-        setError(error.message);
-      });
-  }, []);
-
-  // Handle clicking a storage card (shows Retrieve Files button)
+ 
+  // Debug log to confirm options
+  console.log('Rendering HomePage with options:', allStorageOptions);
+ 
   const handleStorageClick = (option) => {
-    setSelectedStorage(option);
-    setSelectedOption(option);
-    setContainersFetched(false); // Reset so Retrieve button shows
-    setIsFlipping(false); // Reset flip state
+    if (functionalOptions.includes(option)) {
+      console.log(`Clicked functional option: ${option}`);
+      setSelectedStorage(option);
+      setSelectedOption(option);
+      setIsFlipping(false);
+    } else {
+      console.log(`Clicked non-functional option: ${option} (no action)`);
+    }
   };
-
-  // Navigate to the storage-specific page with flip animation and background
+ 
   const handleRetrieveFiles = () => {
-    if (selectedStorage) {
-      setIsFlipping(true); // Trigger flip animation
+    if (selectedStorage && functionalOptions.includes(selectedStorage)) {
+      console.log(`Retrieving files for: ${selectedStorage}`);
+      setIsFlipping(true);
       setTimeout(() => {
-        // Store the flipped card background in sessionStorage using the proxy URL
         const logoUrl = getLogoForStorage(selectedStorage);
         if (logoUrl) {
           const proxiedUrl = `http://localhost:8000/proxy/image?url=${encodeURIComponent(logoUrl)}`;
-          console.log('Storing flipped card background URL (proxied):', proxiedUrl); // Debug log
+          console.log('Storing proxied URL:', proxiedUrl);
           sessionStorage.setItem('flippedCardBackground', proxiedUrl);
         } else {
-          console.error('No logo URL found for storage option:', selectedStorage);
+          console.error('No logo URL for:', selectedStorage);
         }
         navigate(`/${selectedStorage}`);
-      }, 1500); // Match this timeout with the animation duration (1.5s) for a smooth transition
+        setIsFlipping(false); // Reset after navigation
+      }, 1500);
     }
   };
-
-  if (error) {
-    return <div className="error">Error: {error}</div>;
-  }
-
+ 
   return (
     <div className="home-page">
-      {/* Storage Cards with flip animation */}
       <div className="storage-grid">
-        {storageOptions.map((option, index) => (
-          <div
-            key={index}
-            className={`storage-card ${selectedStorage === option && isFlipping ? 'flipping' : ''}`}
-            onClick={() => handleStorageClick(option)}
-          >
-            <div className="card-inner">
-              <div className="card-front">
-                <img
-                  src={getLogoForStorage(option)}
-                  alt={`${option} logo`}
-                  className="storage-logo"
-                />
-                <p className="storage-label">{option}</p>
-              </div>
-              <div className="card-back">
-                <p className="storage-label-back">AI-Powered Storage</p>
+        {allStorageOptions.map((option, index) => {
+          const isFunctional = functionalOptions.includes(option);
+          console.log(`Rendering card: ${option} (functional: ${isFunctional})`);
+          return (
+            <div
+              key={index}
+              className={`storage-card ${isFunctional && selectedStorage === option && isFlipping ? 'flipping' : ''} ${!isFunctional ? 'display-only' : ''}`}
+              onClick={() => handleStorageClick(option)}
+            >
+              <div className="card-inner">
+                <div className="card-front">
+                  <img
+                    src={getLogoForStorage(option)}
+                    alt={`${option} logo`}
+                    className="storage-logo"
+                    onError={() => console.error(`Failed to load logo for: ${option}`)}
+                  />
+                  <p className="storage-label">{option}</p>
+                </div>
+                {isFunctional && (
+                  <div className="card-back">
+                    <p className="storage-label-back">AI-Powered Storage</p>
+                  </div>
+                )}
               </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
-
-      {/* Retrieve Files Button (appears after clicking a storage card) */}
-      {selectedStorage && !containersFetched && (
+      {selectedStorage && functionalOptions.includes(selectedStorage) && (
         <div className="actions">
-          <button
-            className="primary-button"
-            onClick={handleRetrieveFiles}
-          >
+          <button className="primary-button" onClick={handleRetrieveFiles}>
             {'Retrieve Files'}
           </button>
         </div>
@@ -172,7 +195,6 @@ function ContainersPage({ selectedOption, setSelectedContainer, setSelectedFileF
   const [backgroundImage, setBackgroundImage] = useState(null);
   const navigate = useNavigate();
 
-  // Debounce function to prevent multiple rapid calls
   const debounce = (func, wait) => {
     let timeout;
     return function executedFunction(...args) {
@@ -196,86 +218,62 @@ function ContainersPage({ selectedOption, setSelectedContainer, setSelectedFileF
       })
       .finally(() => setLoading(false));
       
-    // Reset background when changing storage option
     setBackgroundImage(null);
     setSelectedContainerState(null);
     setSelectedFileState(null);
     
-    // Clear container-content class to reset any previous background
     const containerContent = document.querySelector('.container-content');
     if (containerContent) {
-      containerContent.classList.remove('expanded');
-      containerContent.classList.remove('loading-glitch');
+      containerContent.classList.remove('expanded', 'loading-glitch');
     }
   }, [selectedOption]);
 
-  // Function to load background image based on selected container
   const loadContainerBackground = (container) => {
     setBackgroundLoading(true);
-    
-    // Add glitch effect during loading
     const containerContent = document.querySelector('.container-content');
     if (containerContent) {
       containerContent.classList.add('loading-glitch');
     }
     
-    // Simulate API call to get container logo
     setTimeout(() => {
-      const logoUrl = sessionStorage.getItem('flippedCardBackground') || 
-                      `/api/placeholder/400/300`; // Fallback to flipped card background or placeholder
-      
+      const logoUrl = sessionStorage.getItem('flippedCardBackground') || `/api/placeholder/400/300`;
       const img = new Image();
       img.crossOrigin = 'Anonymous';
       img.onload = () => {
         setBackgroundImage(img.src);
         setBackgroundLoading(false);
-        
-        // Remove glitch effect after loading
         if (containerContent) {
           containerContent.classList.remove('loading-glitch');
         }
       };
       img.onerror = () => {
-        console.error('Failed to load container logo:', logoUrl);
-        setBackgroundImage(logoUrl); // Use fallback URL even if it errors
+        setBackgroundImage(logoUrl);
         setBackgroundLoading(false);
-        
-        // Remove glitch effect after loading
         if (containerContent) {
           containerContent.classList.remove('loading-glitch');
         }
       };
       img.src = logoUrl;
-    }, 800); // Simulate network delay
+    }, 800);
   };
 
   const handleContainerCheckboxChange = (container) => {
-    // If selecting a new container or toggling off the current one
     if (container !== selectedContainerState) {
       setSelectedContainerState(container);
-      setFiles([]); // Clear files when changing container
+      setFiles([]);
       setSelectedFileState(null);
       setSelectedFileForRules(null);
-      
-      // Load new background for the selected container
       loadContainerBackground(container);
-      
-      // Reset container content to initial state (cropped)
       const containerContent = document.querySelector('.container-content');
       if (containerContent) {
         containerContent.classList.remove('expanded');
       }
-      
-      // Fetch files for the newly selected container
       fetchFiles(container);
     } else {
-      // Deselecting the current container
       setSelectedContainerState(null);
-      setFiles([]); // Clear files if deselected
-      setSelectedContainer(null); // Clear container selection
-      setBackgroundImage(null); // Clear background
-      
-      // Reset container content
+      setFiles([]);
+      setSelectedContainer(null);
+      setBackgroundImage(null);
       const containerContent = document.querySelector('.container-content');
       if (containerContent) {
         containerContent.classList.remove('expanded');
@@ -283,9 +281,9 @@ function ContainersPage({ selectedOption, setSelectedContainer, setSelectedFileF
     }
   };
 
-  const handleFileCheckboxChange = (file) => {
-    setSelectedFileState(file === selectedFileState ? null : file); // Toggle selection
-    setSelectedFileForRules(file === selectedFileState ? null : file); // Update for rules generation
+  const handleFileRadioChange = (file) => {
+    setSelectedFileState(file); // Radio buttons allow only one selection
+    setSelectedFileForRules(file);
   };
 
   const fetchFiles = async (container) => {
@@ -293,8 +291,6 @@ function ContainersPage({ selectedOption, setSelectedContainer, setSelectedFileF
     try {
       const data = await fetchFileDetails(selectedOption, container);
       setFiles(data.files || []);
-      
-      // After files are loaded, expand the container to fit the background properly
       setTimeout(() => {
         const containerContent = document.querySelector('.container-content');
         if (containerContent) {
@@ -313,23 +309,18 @@ function ContainersPage({ selectedOption, setSelectedContainer, setSelectedFileF
       setLoading(true);
       try {
         const rules = await generateFileRules(selectedOption, selectedContainerState, selectedFileState);
-        
-        // Set state before navigation
         setSelectedFileForRules(selectedFileState);
         setSelectedContainer(selectedContainerState);
-        
-        // Navigate to rules page with full state
         navigate(`/${selectedOption}/container/${selectedContainerState}/file/${selectedFileState}/rules`, { 
           state: { 
-            rules: rules, 
+            rules, 
             selectedOption, 
             selectedContainer: selectedContainerState,
             selectedFileForRules: selectedFileState
           },
-          replace: true // Use replace to avoid browser back behavior issues
+          replace: true
         });
       } catch (error) {
-        console.error('Error generating rules:', error);
         setError(error.message || 'Failed to generate rules');
         alert('Failed to generate rules. Please try again.');
       } finally {
@@ -338,7 +329,7 @@ function ContainersPage({ selectedOption, setSelectedContainer, setSelectedFileF
     } else {
       alert('Please select a container and file before generating rules.');
     }
-  }, 500); // Debounce with 500ms delay to prevent rapid calls
+  }, 500);
 
   if (loading && !containers.length) {
     return <div className="loading">Loading...</div>;
@@ -354,96 +345,63 @@ function ContainersPage({ selectedOption, setSelectedContainer, setSelectedFileF
         {selectedOption.charAt(0).toUpperCase() + selectedOption.slice(1)} Storage
       </h2>
       
-      {/* Container content with dynamic background */}
       <div 
         className={`container-content ${files.length > 0 ? 'expanded' : ''} ${backgroundLoading ? 'loading-glitch' : ''}`}
         style={backgroundImage ? {
           backgroundImage: `url(${backgroundImage})`,
-          backgroundSize: '200px auto', // Reduced width to fit within the box (adjust as needed)
+          backgroundSize: '200px auto',
           backgroundPosition: 'center',
           backgroundRepeat: 'no-repeat',
         } : {}}
       >
-        {/* Container Selection with Advanced Cards */}
-        <div className="bg-white p-4 rounded-xl shadow-lg mb-6"> {/* Removed blur from cards */}
+        <div className="bg-white p-4 rounded-xl shadow-lg mb-6">
           <h3 className="text-xl font-semibold text-gray-700 mb-4">Select Container</h3>
           <div className="container-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {containers.map((container, index) => (
               <label 
                 key={index} 
-                className={`container-card flex items-center gap-4 p-4 border border-gray-200 rounded-xl cursor-pointer transition-all duration-300 ${
-                  selectedContainerState === container 
-                    ? 'bg-gradient-to-r from-blue-500 to-purple-600 text-white border-transparent shadow-xl transform scale-105' 
-                    : 'bg-white hover:bg-gray-50 hover:shadow-md'
-                }`}
-                onMouseEnter={(e) => e.currentTarget.classList.add('hover:shadow-xl')}
-                onMouseLeave={(e) => e.currentTarget.classList.remove('hover:shadow-xl')}
+                className={`container-card ${selectedContainerState === container ? 'selected' : ''}`}
               >
                 <input
                   type="checkbox"
                   checked={selectedContainerState === container}
                   onChange={() => handleContainerCheckboxChange(container)}
-                  className="h-5 w-5 text-blue-600 border-gray-300 rounded focus:ring-blue-500 hidden" // Hidden checkbox for custom styling
+                  className="hidden"
                 />
                 <div className="flex items-center justify-between w-full">
                   <span className="text-lg font-medium truncate">
                     {container}
                   </span>
-                  <span className={`text-sm font-light ${selectedContainerState === container ? 'text-white' : 'text-gray-500'}`}>
-              
-                  </span>
                 </div>
-                {selectedContainerState === container && (
-                  <span className="absolute inset-0 bg-gradient-to-r from-blue-500/20 to-purple-600/20 rounded-xl animate-pulse"></span>
-                )}
               </label>
             ))}
           </div>
         </div>
 
-        {/* File Selection with Advanced Cards (visible only if a container is selected) */}
         {selectedContainerState && (
-          <div className="bg-white p-4 rounded-xl shadow-lg"> {/* Removed blur from cards */}
+          <div className="bg-white p-4 rounded-xl shadow-lg">
             <h3 className="text-xl font-semibold text-gray-700 mb-4">Select File</h3>
             <div className="container-grid grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {files.map((file, index) => (
                 <label 
                   key={index} 
-                  className={`container-card flex items-center gap-4 p-4 border border-gray-200 rounded-xl cursor-pointer transition-all duration-300 ${
-                    selectedFileState === file 
-                      ? 'bg-gradient-to-r from-green-500 to-teal-600 text-white border-transparent shadow-xl transform scale-105' 
-                      : 'bg-white hover:bg-gray-50 hover:shadow-md'
-                  }`}
-                  onMouseEnter={(e) => e.currentTarget.classList.add('hover:shadow-xl')}
-                  onMouseLeave={(e) => e.currentTarget.classList.remove('hover:shadow-xl')}
+                  className={`file-card ${selectedFileState === file ? 'selected' : ''}`}
                 >
                   <input
-                    type="checkbox"
+                    type="radio"
+                    name="file-selection" // Ensures only one file can be selected
                     checked={selectedFileState === file}
-                    onChange={() => handleFileCheckboxChange(file)}
-                    className="h-5 w-5 text-green-600 border-gray-300 rounded focus:ring-green-500 hidden" // Hidden checkbox for custom styling
+                    onChange={() => handleFileRadioChange(file)}
                   />
-                  <div className="flex items-center justify-between w-full">
-                    <span className="text-lg font-medium truncate">
-                      {file}
-                    </span>
-                    <span className={`text-sm font-light ${selectedFileState === file ? 'text-white' : 'text-gray-500'}`}>
-  
-                    </span>
-                  </div>
-                  {selectedFileState === file && (
-                    <span className="absolute inset-0 bg-gradient-to-r from-green-500/20 to-teal-600/20 rounded-xl animate-pulse"></span>
-                  )}
+                  <span className="text-lg font-medium truncate">
+                    {file}
+                  </span>
                 </label>
               ))}
             </div>
 
             <button
-              className={`mt-6 w-full py-3 text-white font-semibold rounded-xl transition-all duration-300 ${
-                loading
-                  ? "bg-gray-400 cursor-not-allowed"
-                  : "bg-gradient-to-r from-blue-600 to-purple-700 hover:from-blue-700 hover:to-purple-800 shadow-lg hover:shadow-xl"
-              }`}
+              className={`primary-button mt-6 ${loading ? 'disabled' : ''}`}
               onClick={handleGenerateRules}
               disabled={!selectedFileState || loading}
             >
@@ -453,7 +411,6 @@ function ContainersPage({ selectedOption, setSelectedContainer, setSelectedFileF
         )}
       </div>
       
-      {/* Loading overlay */}
       {backgroundLoading && (
         <div className="background-loading-overlay">
           <div className="glitch-text">Loading Storage Data...</div>
@@ -1178,12 +1135,19 @@ function ExecutionResultsPage() {
   const [newRuleText, setNewRuleText] = useState('');
   const [selectedColumn, setSelectedColumn] = useState('');
   const [ruleLoading, setRuleLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(false); // New state for loading overlay
+  const [filters, setFilters] = useState({
+    surrogate_key: '',
+    invalid_column: '',
+    invalid_value: '',
+  });
 
   const pathSegments = location.pathname.split('/');
-  const fileName = pathSegments[pathSegments.length - 2]; // Second-to-last segment
+  const fileName = pathSegments[pathSegments.length - 2];
+  const containerName = pathSegments[pathSegments.length - 4];
 
   const handleBack = () => {
-    navigate(-1); // Go back to QueryResultsPage
+    navigate(-1);
   };
 
   const handleAddRuleClick = () => {
@@ -1198,7 +1162,7 @@ function ExecutionResultsPage() {
 
     setRuleLoading(true);
     try {
-      const baseFileName = fileName.split('.')[0].toLowerCase(); // Extract base filename
+      const baseFileName = fileName.split('.')[0].toLowerCase();
       await addRule(baseFileName, selectedColumn, newRuleText);
       alert('Rule added successfully!');
       setNewRuleText('');
@@ -1218,6 +1182,34 @@ function ExecutionResultsPage() {
     setShowRuleEditor(false);
   };
 
+  const handleCorrectInvalidRecords = async () => {
+    setIsLoading(true); // Show loading overlay
+    
+    try {
+      // Simulate a delay to show the loading state
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      
+      const response = await validateData(containerName, fileName);
+      setIsLoading(false); // Hide loading overlay
+      navigate(`/${pathSegments[1]}/container/${containerName}/file/${fileName}/validation-results`, {
+        state: { validationResponse: response }
+      });
+    } catch (error) {
+      console.error('Validation error:', error);
+      setIsLoading(false); // Hide loading overlay
+      navigate(`/${pathSegments[1]}/container/${containerName}/file/${fileName}/validation-results`, {
+        state: { validationResponse: { error: error.message || 'Failed to validate data' } }
+      });
+    }
+  };
+
+  const handleFilterChange = (e, column) => {
+    setFilters({
+      ...filters,
+      [column]: e.target.value.toLowerCase(),
+    });
+  };
+
   if (!executionResponse) {
     return (
       <div className="execution-results-page">
@@ -1231,57 +1223,52 @@ function ExecutionResultsPage() {
     );
   }
 
-  // Extract invalid_data from the response
   const invalidData = executionResponse.results?.invalid_data || [];
-  const uniqueColumns = [...new Set(invalidData.map(item => item.invalid_column))]; // Unique column names for dropdown
+  const uniqueColumns = [...new Set(invalidData.map(item => item.invalid_column))];
+
+  // Filter the data based on user input
+  const filteredData = invalidData.filter(row =>
+    String(row.surrogate_key).toLowerCase().includes(filters.surrogate_key) &&
+    String(row.invalid_column).toLowerCase().includes(filters.invalid_column) &&
+    String(row.invalid_value).toLowerCase().includes(filters.invalid_value)
+  );
 
   return (
     <div className="execution-results-page">
+      {/* Loading Overlay */}
+      <LoadingOverlay isVisible={isLoading} />
+      
       <header className="page-header">
-        
         <div className="header-content">
           <h2 className="page-title">Execution Results</h2>
-          <button className="back-button" onClick={handleBack}>
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M15 18l-6-6 6-6" />
-            </svg>
-            Back to Query Results
-          </button>
+          <div className="header-actions">
+            <button className="correct-button" onClick={handleCorrectInvalidRecords}>
+              Correct Invalid Records
+            </button>
+            <button className="back-button" onClick={handleBack}>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+              Back to Query Results
+            </button>
+          </div>
         </div>
       </header>
       <div className="results-container">
         <section className="execution-section">
           <h3>Invalid Data</h3>
           {invalidData.length > 0 ? (
-            <div className="invalid-data-table">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Surrogate Key</th>
-                    <th>Invalid Column</th>
-                    <th>Invalid Value</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {invalidData.map((row, index) => (
-                    <tr key={index}>
-                      <td>{row.surrogate_key}</td>
-                      <td>{row.invalid_column}</td>
-                      <td>{row.invalid_value}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="invalid-data-container">
               <div className="add-rule-section">
                 <p className="add-rule-prompt">Do you want to add any column-specific rule?</p>
                 {!showRuleEditor ? (
@@ -1328,6 +1315,55 @@ function ExecutionResultsPage() {
                   </div>
                 )}
               </div>
+              <div className="invalid-data-table-wrapper">
+                <table className="invalid-data-table">
+                  <thead>
+                    <tr>
+                      <th>Surrogate Key</th>
+                      <th>Invalid Column</th>
+                      <th>Invalid Value</th>
+                    </tr>
+                    <tr className="filter-row">
+                      <td>
+                        <input
+                          type="text"
+                          value={filters.surrogate_key}
+                          onChange={(e) => handleFilterChange(e, 'surrogate_key')}
+                          placeholder="Filter..."
+                          className="filter-input"
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="text"
+                          value={filters.invalid_column}
+                          onChange={(e) => handleFilterChange(e, 'invalid_column')}
+                          placeholder="Filter..."
+                          className="filter-input"
+                        />
+                      </td>
+                      <td>
+                        <input
+                          type="text"
+                          value={filters.invalid_value}
+                          onChange={(e) => handleFilterChange(e, 'invalid_value')}
+                          placeholder="Filter..."
+                          className="filter-input"
+                        />
+                      </td>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredData.map((row, index) => (
+                      <tr key={index}>
+                        <td>{row.surrogate_key}</td>
+                        <td>{row.invalid_column}</td>
+                        <td>{row.invalid_value}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           ) : (
             <p className="no-data">No invalid data found.</p>
@@ -1337,350 +1373,199 @@ function ExecutionResultsPage() {
     </div>
   );
 }
-// function SQLQueriesPage() {
-//   const [loading, setLoading] = useState(true);
-//   const [error, setError] = useState(null);
-//   const [queryResults, setQueryResults] = useState(null);
-//   const { provider, containerName, fileName } = useParams();
-//   const requestSentRef = useRef(false);
-//   const location = useLocation();
-//   const navigate = useNavigate();
 
-//   useEffect(() => {
-//     const fetchSQLQueries = async () => {
-//       if (requestSentRef.current) return;
-//       if (!location.state?.shouldFetch) {
-//         console.log('Skipping fetch because shouldFetch is not set');
-//         setLoading(false);
-//         return;
-//       }
+function ValidationResultsPage() {
+  const location = useLocation();
+  const navigate = useNavigate();
+  const validationResponse = location.state?.validationResponse;
+  const [showUploadEditor, setShowUploadEditor] = useState(false);
+  const [newFileName, setNewFileName] = useState('');
+  const [uploadLoading, setUploadLoading] = useState(false);
 
-//       try {
-//         requestSentRef.current = true;
-//         setLoading(true);
-//         console.log(`Fetching SQL queries for ${provider}/${containerName}/${fileName}`);
-//         const results = await generateSQLQueries(provider, containerName, fileName);
-//         setQueryResults(results);
-//       } catch (err) {
-//         console.error('Error generating SQL queries:', err);
-//         setError('Failed to generate SQL queries. Please try again.');
-//       } finally {
-//         setLoading(false);
-//       }
-//     };
+  const pathSegments = location.pathname.split('/');
+  const provider = pathSegments[1]; // e.g., "aws" or "azure"
+  const containerName = pathSegments[pathSegments.length - 4];
+  const fileName = pathSegments[pathSegments.length - 2];
 
-//     fetchSQLQueries();
+  const handleBack = () => {
+    navigate(-1);
+  };
 
-//     return () => {
-//       requestSentRef.current = false;
-//     };
-//   }, [provider, containerName, fileName, location.state]);
-
-//   const handleViewInvalidRecords = () => {
-//     navigate(`/${provider}/container/${containerName}/file/${fileName}/invalid-records`, {
-//       state: { shouldExecuteQueries: true }
-//     });
-//   };
-
-//   if (loading) return <div className="loading">Generating SQL queries...</div>;
-//   if (error) return <div className="error">{error}</div>;
-//   if (!queryResults) return <div className="no-results">No SQL queries could be generated.</div>;
-
-//   // Format SQL queries more professionally
-//   function formatSQLQuery(query) {
-//     // Keywords to be capitalized and have their own line
-//     const mainKeywords = [
-//       'SELECT', 'FROM', 'WHERE', 'GROUP BY', 'HAVING', 'ORDER BY', 
-//       'LIMIT', 'OFFSET', 'JOIN', 'LEFT JOIN', 'RIGHT JOIN', 'INNER JOIN', 
-//       'FULL JOIN', 'UNION', 'UNION ALL', 'INSERT INTO', 'VALUES', 
-//       'UPDATE', 'SET', 'DELETE FROM', 'CREATE TABLE', 'ALTER TABLE', 
-//       'DROP TABLE', 'WITH'
-//     ];
-    
-//     // Keywords that should be capitalized but not necessarily on their own line
-//     const subKeywords = ['AND', 'OR', 'ON', 'AS', 'IN', 'BETWEEN', 'LIKE', 'IS NULL', 'IS NOT NULL', 'EXISTS', 'NOT EXISTS'];
-    
-//     // First, normalize spacing and line breaks
-//     let formattedQuery = query.replace(/\s+/g, ' ').trim();
-    
-//     // Capitalize all SQL keywords
-//     [...mainKeywords, ...subKeywords].forEach(keyword => {
-//       // Use word boundary to avoid partial matches
-//       const regex = new RegExp(`\\b${keyword.replace(/\s+/g, '\\s+')}\\b`, 'gi');
-//       formattedQuery = formattedQuery.replace(regex, keyword);
-//     });
-    
-//     // Add line breaks before main keywords
-//     mainKeywords.forEach(keyword => {
-//       formattedQuery = formattedQuery.replace(
-//         new RegExp(`\\b${keyword}\\b`, 'g'), 
-//         `\n${keyword}`
-//       );
-//     });
-    
-//     // Indent AND/OR conditions
-//     formattedQuery = formattedQuery.replace(/\n(AND|OR)\b/g, '\n    $1');
-    
-//     // Format JOIN ON conditions
-//     formattedQuery = formattedQuery.replace(/\b(ON)\b/g, '\n    ON');
-    
-//     // Handle parentheses
-//     formattedQuery = formattedQuery.replace(/\(/g, ' (');
-//     formattedQuery = formattedQuery.replace(/\s+\(/g, ' (');
-    
-//     // Special case for SELECT clauses - add new lines for each column if there are multiple
-//     if (formattedQuery.includes('SELECT') && !formattedQuery.includes('SELECT *')) {
-//       const selectPattern = /SELECT(.*?)(?=\n\w|\Z)/s;
-//       const selectMatch = formattedQuery.match(selectPattern);
-      
-//       if (selectMatch && selectMatch[1] && selectMatch[1].includes(',')) {
-//         const columns = selectMatch[1].split(',');
-//         const formattedColumns = columns.map((col, i) => 
-//           i === 0 ? col.trim() : `\n    ${col.trim()}`
-//         ).join(',');
-        
-//         formattedQuery = formattedQuery.replace(
-//           selectPattern, 
-//           `SELECT${formattedColumns}`
-//         );
-//       }
-//     }
-    
-//     // Add semicolon at the end if missing
-//     if (!formattedQuery.endsWith(';')) {
-//       formattedQuery += ';';
-//     }
-    
-//     // Remove the first new line if it exists
-//     formattedQuery = formattedQuery.replace(/^\n/, '');
-    
-//     return formattedQuery;
-//   }
-
-//   return (
-//     <div className="sql-queries-page">
-//       <h2 className="page-title">Generated SQL Queries for {fileName}</h2>
-
-//       <div className="results-container">
-//         <div className="query-section">
-//           <h3>Successful Queries</h3>
-//           {Object.keys(queryResults.results.successful_queries).length > 0 ? (
-//             <div className="queries-list">
-//               {Object.entries(queryResults.results.successful_queries).map(([column, query]) => (
-//                 <div key={column} className="query-card">
-//                   <h4>{column}</h4>
-//                   <pre className="sql-code">{formatSQLQuery(query)}</pre>
-//                 </div>
-//               ))}
-//             </div>
-//           ) : (
-//             <p>No successful queries generated.</p>
-//           )}
-//         </div>
-
-//         {Object.keys(queryResults.results.failed_queries).length > 0 && (
-//           <div className="query-section">
-//             <h3>Failed Queries</h3>
-//             <div className="queries-list">
-//               {Object.entries(queryResults.results.failed_queries).map(([column, error]) => (
-//                 <div key={column} className="query-card error-card">
-//                   <h4>{column}</h4>
-//                   <pre className="error-message">{error}</pre>
-//                 </div>
-//               ))}
-//             </div>
-//           </div>
-//         )}
-//       </div>
-
-//       {/* Add the View Invalid Records button at the bottom right */}
-//       <div className="action-button-container">
-//         <button 
-//           className="view-invalid-records-button" 
-//           onClick={handleViewInvalidRecords}
-//         >
-//           View Invalid Records
-//         </button>
-//       </div>
-//     </div>
-//   );
-// }
-
-// function InvalidRecordPage() {
-//   const [loading, setLoading] = useState(true);
-//   const [error, setError] = useState(null);
-//   const [invalidRecords, setInvalidRecords] = useState([]);
-//   const { provider, containerName, fileName } = useParams();
-//   const location = useLocation();
-//   const requestSentRef = useRef(false);
-
-//   useEffect(() => {
-//     const fetchInvalidRecords = async () => {
-//       if (requestSentRef.current) return;
-//       if (!location.state?.shouldExecuteQueries) {
-//         console.log('Skipping execution because shouldExecuteQueries is not set');
-//         setLoading(false);
-//         return;
-//       }
-
-//       try {
-//         requestSentRef.current = true;
-//         setLoading(true);
-//         console.log(`Executing stored queries for ${containerName}/${fileName}`);
-//         const results = await executeStoredQueries(containerName, fileName);
-        
-//         if (results.status === 'success' && results.results.invalid_data) {
-//           setInvalidRecords(results.results.invalid_data);
-//         } else {
-//           setInvalidRecords([]);
-//         }
-//       } catch (err) {
-//         console.error('Error executing stored queries:', err);
-//         setError('Failed to fetch invalid records. Please try again.');
-//       } finally {
-//         setLoading(false);
-//       }
-//     };
-
-//     fetchInvalidRecords();
-
-//     return () => {
-//       requestSentRef.current = false;
-//     };
-//   }, [containerName, fileName, location.state]);
-
-//   if (loading) return <div className="loading">Fetching invalid records...</div>;
-//   if (error) return <div className="error">{error}</div>;
-
-//   return (
-//     <div className="invalid-record-page">
-//       <h2 className="page-title">Invalid Records for {fileName}</h2>
-      
-//       {invalidRecords.length > 0 ? (
-//         <div className="invalid-records-container">
-//           <table className="invalid-records-table">
-//             <thead>
-//               <tr>
-//                 <th>Surrogate Key</th>
-//                 <th>Invalid Column</th>
-//                 <th>Invalid Value</th>
-//               </tr>
-//             </thead>
-//             <tbody>
-//               {invalidRecords.map((record, index) => (
-//                 <tr key={index}>
-//                   <td>{record.surrogate_key}</td>
-//                   <td>{record.invalid_column}</td>
-//                   <td>{record.invalid_value}</td>
-//                 </tr>
-//               ))}
-//             </tbody>
-//           </table>
-//         </div>
-//       ) : (
-//         <p className="no-records-message">No invalid records found.</p>
-//       )}
-//     </div>
-//   );
-// }
-// Validation Page
-function ValidationPage({ selectedOption, selectedContainer, selectedFileForRules, selectedColumns, selectedFile }) {
-  const [validationResults, setValidationResults] = useState(null);
-  const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    if (selectedOption && selectedContainer && selectedFileForRules && selectedColumns.length > 0) {
-      validateData(
-        selectedOption,
-        selectedContainer,
-        selectedFileForRules,
-        selectedColumns,
-        selectedFile // Only for local storage
-      )
-        .then((data) => {
-          setValidationResults(data);
-          setLoading(false);
-        })
-        .catch((error) => {
-          setError(error.message);
-          setLoading(false);
-        });
-    } else {
-      setError('Missing required parameters for validation');
-      setLoading(false);
+  const handleDownloadCSV = () => {
+    const correctedDataset = validationResponse.corrected_dataset || [];
+    if (correctedDataset.length === 0) {
+      alert('No corrected dataset available to download.');
+      return;
     }
-  }, [selectedOption, selectedContainer, selectedFileForRules, selectedColumns, selectedFile]);
 
-  if (loading) {
-    return <div className="loading">Validating data...</div>;
+    const headers = Object.keys(correctedDataset[0]).join(',');
+    const rows = correctedDataset.map(row => 
+      Object.values(row).map(value => `"${value}"`).join(',')
+    ).join('\n');
+    const csvContent = `${headers}\n${rows}`;
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = 'corrected_dataset.csv';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleUploadBackToSource = async () => {
+    if (!newFileName.trim()) {
+      alert('Please enter a filename.');
+      return;
+    }
+
+    setUploadLoading(true);
+    try {
+      const response = await uploadCorrectedDataset(provider, containerName, fileName, newFileName);
+      alert(response.message);
+      setNewFileName('');
+      setShowUploadEditor(false);
+    } catch (error) {
+      console.error('Upload error:', error);
+      alert(error.message || 'Failed to upload corrected dataset.');
+    } finally {
+      setUploadLoading(false);
+    }
+  };
+
+  if (!validationResponse) {
+    return (
+      <div className="validation-results-page">
+        <div className="no-results-container">
+          <p className="no-results">No validation results available.</p>
+          <button className="back-button" onClick={handleBack}>
+            Back to Execution Results
+          </button>
+        </div>
+      </div>
+    );
   }
 
-  if (error) {
-    return <div className="error">Error: {error}</div>;
-  }
-
-  if (!validationResults) {
-    return <div className="no-results">No validation results available.</div>;
-  }
+  const successfulValidation = validationResponse.successful_validation || {};
+  const correctedDataset = validationResponse.corrected_dataset || [];
 
   return (
-    <div className="validation-page">
-      <h2>Validation Results</h2>
-      
-      <div className="validation-results">
-        <p>Status: {validationResults.status}</p>
-        <p>Has Headers: {validationResults.has_headers.toString()}</p>
+    <div className="validation-results-page">
+      <header className="page-header">
+        <div className="header-content">
+          <h2 className="page-title">Validation Results</h2>
+          <div className="header-actions">
+            <button className="download-button" onClick={handleDownloadCSV}>
+              Download to CSV
+            </button>
+            <button className="upload-source-button" onClick={() => setShowUploadEditor(true)}>
+              Upload Back to Source
+            </button>
+            {showUploadEditor && (
+              <div className="upload-editor">
+                <input
+                  type="text"
+                  value={newFileName}
+                  onChange={(e) => setNewFileName(e.target.value)}
+                  placeholder="Enter filename (e.g., corrected_data)"
+                  className="filename-input"
+                  disabled={uploadLoading}
+                />
+                <button
+                  className="upload-button"
+                  onClick={handleUploadBackToSource}
+                  disabled={uploadLoading}
+                >
+                  {uploadLoading ? 'Uploading...' : 'Upload'}
+                </button>
+              </div>
+            )}
+            <button className="back-button" onClick={handleBack}>
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="20"
+                height="20"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M15 18l-6-6 6-6" />
+              </svg>
+              Back to Execution Results
+            </button>
+          </div>
+        </div>
+      </header>
+      <div className="results-container">
+        <section className="corrected-dataset-section">
+          <h3>Corrected Dataset</h3>
+          {correctedDataset.length > 0 ? (
+            <div className="corrected-dataset-table">
+              <table>
+                <thead>
+                  <tr>
+                    {Object.keys(correctedDataset[0]).map((key) => (
+                      <th key={key}>{key}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {correctedDataset.map((row, index) => (
+                    <tr key={index}>
+                      {Object.values(row).map((value, i) => (
+                        <td key={i}>{value}</td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="no-data">No corrected dataset available.</p>
+          )}
+        </section>
 
-        <h3>Column Mapping</h3>
-        <pre>{JSON.stringify(validationResults.column_mapping, null, 2)}</pre>
-
-        <h3>Modifications</h3>
-        {validationResults.modifications.length > 0 ? (
-          <pre>{JSON.stringify(validationResults.modifications, null, 2)}</pre>
-        ) : (
-          <p>No modifications were made.</p>
-        )}
-
-        <h3>Original Data Sample</h3>
-        <table>
-          <thead>
-            <tr>
-              {Object.keys(validationResults.original_data[0]).map((column) => (
-                <th key={column}>{column}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {validationResults.original_data.slice(0, 5).map((row, index) => (
-              <tr key={index}>
-                {Object.values(row).map((value, colIndex) => (
-                  <td key={colIndex}>{value}</td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-
-        <h3>Corrected Data Sample</h3>
-        <table>
-          <thead>
-            <tr>
-              {Object.keys(validationResults.corrected_data[0]).map((column) => (
-                <th key={column}>{column}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {validationResults.corrected_data.slice(0, 5).map((row, index) => (
-              <tr key={index}>
-                {Object.values(row).map((value, colIndex) => (
-                  <td key={colIndex}>{value}</td>
-                ))}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <section className="validation-section">
+          <h3>Successful Validations</h3>
+          {Object.keys(successfulValidation).length > 0 ? (
+            Object.entries(successfulValidation).map(([column, data]) => (
+              <div key={column} className="column-validation">
+                <h4 className="column-title">{column}</h4>
+                <div className="validation-table">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Surrogate Key</th>
+                        <th>Invalid Value</th>
+                        <th>Corrected Value</th>
+                        <th>Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.records.map((record, index) => (
+                        <tr key={index}>
+                          <td>{record.surrogate_key}</td>
+                          <td>{record.invalid_value}</td>
+                          <td>{record.corrected_value}</td>
+                          <td>{record.reason}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="validation-summary">
+                  <p>Invalid Values: {data.summary.invalid_value_count}</p>
+                  <p>Corrected: {data.summary.corrected_count}</p>
+                </div>
+              </div>
+            ))
+          ) : (
+            <p className="no-data">No successful validations found.</p>
+          )}
+        </section>
       </div>
     </div>
   );
@@ -1763,24 +1648,16 @@ function App() {
               }
             />
             <Route
-              path="/:provider/container/:containerName/file/:fileName/validate"
-              element={
-                <ValidationPage
-                  selectedOption={selectedOption}
-                  selectedContainer={selectedContainer}
-                  selectedFileForRules={selectedFileForRules}
-                  selectedColumns={selectedColumns}
-                  selectedFile={selectedFile}
-                />
-              }
-            />
-            <Route
               path="/:provider/container/:containerName/file/:fileName/query-results"
               element={<QueryResultsPage />}
             />
             <Route
               path="/:provider/container/:containerName/file/:fileName/execution-results"
               element={<ExecutionResultsPage />}
+            />
+            <Route
+              path="/:provider/container/:containerName/file/:fileName/validation-results"
+              element={<ValidationResultsPage />}
             />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

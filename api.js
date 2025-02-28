@@ -82,36 +82,6 @@ export const generateFileRules = async (storageOption, container, fileName) => {
   }
 };
 
-export const validateData = async (storageOption, container, fileName, selectedColumns, file) => {
-  const formData = new FormData();
-  
-  // Add column selection as JSON
-  formData.append('column_selection', JSON.stringify({
-    selected_columns: selectedColumns
-  }));
-
-  // Add file if validating local storage
-  if (storageOption === 'local' && file) {
-    formData.append('file', file);
-  }
-
-  try {
-    const response = await api.post(
-      `/validate-data/${storageOption}/${container}/${fileName}`,
-      formData,
-      {
-        headers: {
-          'Content-Type': 'multipart/form-data',
-        },
-      }
-    );
-    return response.data;
-  } catch (error) {
-    console.error('Error validating data:', error);
-    throw error;
-  }
-};
-
 export const addRule = async (fileName, columnName, rule) => {
   try {
     const response = await api.post(
@@ -180,6 +150,42 @@ export const executeStoredQueries = async (containerName, fileName) => {
     return response.data; // Return the full response (including status and results)
   } catch (error) {
     throw new Error(error.response?.data?.detail || error.message || 'Error executing queries');
+  }
+};
+
+// api.js
+export const validateData = async (containerName, fileName) => {
+  try {
+    const response = await api.post(
+      `/validate-data/${containerName}/${fileName}`,
+      {},
+      {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+    return response.data.results;
+  } catch (error) {
+    throw new Error(error.response?.data?.detail || error.message || 'Error validating data');
+  }
+};
+
+// api.js (only adding the new function, rest remains unchanged)
+export const uploadCorrectedDataset = async (provider, containerName, fileName, newFileName) => {
+  try {
+    const response = await api.post(
+      `/upload-corrected/${provider}/${containerName}/${fileName}`,
+      { new_file_name: newFileName },
+      {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }
+    );
+    return response.data;
+  } catch (error) {
+    throw new Error(error.response?.data?.detail || error.message || 'Error uploading corrected dataset');
   }
 };
 // export const executeStoredQueries = async (container_name, file_name) => {

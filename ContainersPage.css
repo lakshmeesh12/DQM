@@ -121,13 +121,13 @@ h3 {
   align-items: center;
   gap: 12px;
   padding: 16px;
-  background: #ffffff; /* Clear background, no blur */
+  background: #ffffff;
   border: 1px solid #e2e8f0;
   border-radius: 12px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
   transition: all 0.3s ease;
   overflow: hidden;
-  z-index: 2; /* Ensure cards stay above background */
+  z-index: 2;
 }
 
 .container-card:hover:not(.selected) {
@@ -140,7 +140,7 @@ h3 {
   border: none;
   box-shadow: 0 8px 16px rgba(0, 0, 0, 0.15);
   transform: scale(1.05);
-  background: #4a90e2; /* Solid color for selected, no blur */
+  background: #4a90e2; /* Blue for selected container */
 }
 
 .container-card span {
@@ -260,4 +260,45 @@ h3 {
 
 .error {
   color: #e53e3e;
+}
+.file-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  transition: all 0.3s ease;
+  overflow: hidden;
+  z-index: 2;
+}
+
+.file-card.selected {
+  border: 2px solid #38b2ac; /* Teal border for selected file */
+  background: #e6fffa; /* Light teal background */
+}
+
+/* Custom radio button styling */
+.file-card input[type="radio"] {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  border: 2px solid #4a90e2;
+  border-radius: 50%;
+  outline: none;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.file-card input[type="radio"]:checked {
+  background: #4a90e2;
+  border-color: #4a90e2;
+  box-shadow: inset 0 0 0 3px #ffffff;
+}
+
+.file-card input[type="radio"]:hover:not(:checked) {
+  border-color: #357abd;
 }

@@ -1,3 +1,5 @@
+#main.py
+
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -337,17 +339,46 @@ async def store_data(
         if not file_content:
             raise HTTPException(status_code=500, detail="No file content was retrieved")
 
-        # Detect headers (assuming detect_headers is synchronous)
+        # Detect headers
         has_header = detect_headers(file_content)
         
-        # Generate column names if no headers (assuming column_name_gen is synchronous)
-        generated_columns = None
+        # Handle case when headers don't exist
         if not has_header:
+            # First, parse the CSV into a DataFrame without headers
+            temp_df = pd.read_csv(io.StringIO(file_content), header=None)
+            
+            # Generate column names
             generated_columns = column_name_gen(file_content)
-            # Convert generated column names to list in correct order
-            column_names = [generated_columns[str(i)] for i in range(len(generated_columns))]
-            # Create DataFrame with generated column names
-            df = pd.read_csv(io.StringIO(file_content), header=None, names=column_names)
+            
+            # Get ordered column names based on the actual number of columns in the DataFrame
+            num_columns = len(temp_df.columns)
+            
+            # Log column information for debugging
+            logger.info(f"Number of columns in CSV: {num_columns}")
+            logger.info(f"Generated column names: {generated_columns}")
+            
+            # Make sure we have the right number of column names
+            if len(generated_columns) != num_columns:
+                logger.warning(f"Column count mismatch: CSV has {num_columns} columns but generated {len(generated_columns)} names")
+                
+                # Adjust generated columns to match DataFrame columns
+                if len(generated_columns) < num_columns:
+                    # Add generic names for extra columns
+                    for i in range(len(generated_columns), num_columns):
+                        generated_columns[str(i)] = f"Column_{i+1}"
+                else:
+                    # Remove excess column names
+                    generated_columns = {str(i): generated_columns[str(i)] for i in range(num_columns)}
+            
+            # Get column names in correct order
+            column_names = [generated_columns[str(i)] for i in range(num_columns)]
+            
+            # Create a new DataFrame with the proper column names
+            df = temp_df.copy()
+            df.columns = column_names
+            
+            # Log successful renaming
+            logger.info(f"Successfully renamed columns: {df.columns.tolist()}")
         else:
             # Create DataFrame with existing headers
             df = pd.read_csv(io.StringIO(file_content), header=0)
@@ -360,26 +391,44 @@ async def store_data(
             generated_columns=generated_columns if not has_header else None
         )
 
+        # Log column mapping for debugging
+        logger.info(f"Column mapping: {column_mapping}")
+        
+        # Check if all columns in df are in column_mapping
+        missing_columns = [col for col in df.columns if col not in column_mapping]
+        if missing_columns:
+            logger.warning(f"Some columns are missing from mapping: {missing_columns}")
+            # Add missing columns to mapping
+            for col in missing_columns:
+                sanitized_col = table_manager._sanitize_column_name(col)
+                column_mapping[col] = sanitized_col
+
+        # Update DataFrame with mapped column names
+        mapped_df = df.copy()
+        mapped_df.columns = [column_mapping[col] for col in df.columns]
+        
         # Clean the DataFrame and process for further operations
-        df.columns = column_mapping.values()
-        df = df.dropna(how='all').reset_index(drop=True)
+        mapped_df = mapped_df.dropna(how='all').reset_index(drop=True)
 
         # Initialize dq_rules and converted_dq_rules to empty dictionaries
         dq_rules = {}
         converted_dq_rules = {}
 
-        # Detect and generate lookup tables using mapped column names (assuming synchronous)
+        # Detect and generate lookup tables using mapped column names
         try:
-            current_df_string = df.to_csv(index=False)
+            current_df_string = mapped_df.to_csv(index=False)
             lookup_columns = detect_lookup_columns(current_df_string)
             initial_lookup_tables = generate_lookup_tables(current_df_string, lookup_columns) if lookup_columns else None
             
-            # Add validation step (assuming synchronous)
+            # Add validation step
             if initial_lookup_tables:
+                # Log the original lookup tables to help with debugging
+                logger.info(f"Original lookup tables before validation: {initial_lookup_tables}")
+                
                 validated_lookup_tables = validate_lookup_tables(initial_lookup_tables)
                 logger.info(f"Validated lookup tables: {validated_lookup_tables}")
                 
-                # Use validated lookup tables for DQ rule generation (assuming synchronous)
+                # Use validated lookup tables for DQ rule generation
                 dq_rules = generate_dq_rules(current_df_string, column_mapping, validated_lookup_tables)
             else:
                 dq_rules = generate_dq_rules(current_df_string, column_mapping)
@@ -394,16 +443,16 @@ async def store_data(
 
         # Generate statistics for each column
         column_statistics = {}
-        for col in df.columns:
-            non_null_count = df[col].notna().sum()
-            total_count = len(df)
-            unique_count = df[col].nunique()
+        for col in mapped_df.columns:
+            non_null_count = mapped_df[col].notna().sum()
+            total_count = len(mapped_df)
+            unique_count = mapped_df[col].nunique()
             
             column_statistics[col] = {
                 "completeness": (non_null_count / total_count) * 100 if total_count else 0,
                 "unique_count": unique_count,
                 "uniqueness_ratio": (unique_count / total_count) * 100 if total_count else 0,
-                "non_empty_ratio": (df[col].count() / total_count) * 100 if total_count else 0
+                "non_empty_ratio": (mapped_df[col].count() / total_count) * 100 if total_count else 0
             }
 
         # Store rules in JSON files
@@ -414,7 +463,7 @@ async def store_data(
         
         stored_rules_paths = {}
         for col_name, rules in converted_dq_rules.items():
-            sanitized_name = DynamicTableManager()._sanitize_column_name(col_name)
+            sanitized_name = table_manager._sanitize_column_name(col_name)
             rules_file = os.path.join(file_rules_dir, f"{sanitized_name}_rules.json")
             with open(rules_file, 'w') as f:
                 json.dump(rules, f, indent=2)
@@ -433,7 +482,7 @@ async def store_data(
                 "has_headers": has_header,
                 "original_columns": list(column_mapping.keys()),
                 "sanitized_columns": list(column_mapping.values()),
-                "row_count": len(df),
+                "row_count": len(mapped_df),
                 "processed_at": datetime.now().isoformat(),
                 "generated_columns": generated_columns if not has_header else None
             },
@@ -479,6 +528,11 @@ async def store_data(
         error_detail = str(e)
         if len(error_detail) > 200:
             error_detail = error_detail[:200] + "..."
+        
+        # Add traceback to log for detailed debugging
+        import traceback
+        logger.error(f"Detailed traceback: {traceback.format_exc()}")
+        
         raise HTTPException(status_code=500, detail=error_detail)
     
 @app.get("/rules/{storage_option}/{container}/{file_name}")
@@ -640,30 +694,43 @@ async def get_rules(
         logger.error(f"Error fetching rules: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
  
-@app.post("/invalid-data/{selected_option}/{container_name}/{file_name}")
-def generate_invalid_data_queries(selected_option: str, container_name: str, file_name: str):
+# Define UploadRequest model
+class UploadRequest(BaseModel):
+    new_file_name: str
+
+
+@app.post("/process-and-execute-queries/{selected_option}/{container_name}/{file_name}")
+def process_and_execute_queries(selected_option: str, container_name: str, file_name: str):
     try:
         file_base_name = file_name.split('.')[0].lower()
         rules_dir = os.path.join("rules", file_base_name)
         table_name = f"data_{file_base_name.replace('-', '_')}"
         sandbox_engine = create_engine("postgresql://postgres:Lakshmeesh@localhost:5432/DQM-sandbox")
-       
         tracker = QueryTracker(output_dir=f"query_logs/{file_base_name}")
         query_generator = SQLQueryGenerator(sandbox_engine, tracker)
-       
-        results = {'successful_queries': {}, 'failed_queries': {}, 'execution_logs': [], 'cleanup_status': False}
-       
+        
+        results = {
+            'successful_queries': {},
+            'failed_queries': {},
+            'successful_executions': {},
+            'failed_executions': {},
+            'invalid_data': [],
+            'execution_logs': [],
+            'cleanup_status': False
+        }
+        
+        # Step 1: Generate and test queries in sandbox
         with sandbox_engine.connect() as conn:
             sample_data = {}
             for col in inspect(sandbox_engine).get_columns(table_name):
                 result = conn.execute(text(f"SELECT {col['name']} FROM {table_name} LIMIT 10"))
                 sample_data[col['name']] = [row[0] for row in result]
-       
+        
         total_rules = len([f for f in os.listdir(rules_dir) if f.endswith("_rules.json")])
         if total_rules == 0:
             tracker.logger.warning("No rules files found to process")
             return JSONResponse({"status": "warning", "message": "No rules files found to process", "results": results})
-       
+        
         all_queries_successful = True
         for rules_file in os.listdir(rules_dir):
             if not rules_file.endswith("_rules.json"):
@@ -683,94 +750,90 @@ def generate_invalid_data_queries(selected_option: str, container_name: str, fil
                 all_queries_successful = False
                 results['failed_queries'][col_name] = str(e)
                 tracker.logger.error(f"Failed to generate/test query for {col_name}: {str(e)}")
-       
+        
+        # Step 2: If all queries successful, proceed with execution on main database
         if all_queries_successful and len(results['successful_queries']) == total_rules:
-            results['cleanup_status'] = query_generator.drop_sandbox_table(table_name)
-            tracker.logger.info(f"Cleanup: {results['cleanup_status']}")
-       
+            try:
+                execution_results = query_generator.store_invalid_records(table_name)
+                results['successful_executions'] = execution_results['successful_executions']
+                results['failed_executions'] = execution_results['failed_executions']
+                
+                # Fetch invalid records
+                invalid_table_name = f"invalid_records_{table_name}"
+                try:
+                    with query_generator.main_engine.connect() as conn:
+                        result = conn.execute(text(f"SELECT surrogate_key, invalid_column, invalid_value FROM {invalid_table_name}"))
+                        results['invalid_data'] = [
+                            {
+                                "surrogate_key": row["surrogate_key"],
+                                "invalid_column": row["invalid_column"],
+                                "invalid_value": row["invalid_value"]
+                            }
+                            for row in result.mappings()
+                        ]
+                except SQLAlchemyError as e:
+                    logger.warning(f"Could not fetch invalid records from {invalid_table_name}: {str(e)}")
+                
+                # Perform cleanup
+                results['cleanup_status'] = query_generator.drop_sandbox_table(table_name)
+                tracker.logger.info(f"Cleanup: {results['cleanup_status']}")
+                
+            except Exception as e:
+                logger.error(f"Execution error: {str(e)}")
+                results['failed_executions']['general'] = str(e)
+        
+        # Load execution logs
         log_path = tracker.output_dir / "query_generation.log"
         if log_path.exists():
             with open(log_path, 'r') as f:
                 results['execution_logs'] = f.readlines()
-       
+        
         return JSONResponse({"status": "success", "results": results})
-   
+    
     except Exception as e:
-        detailed_error = f"Query generation error: {str(e)}"
+        detailed_error = f"Processing error for {file_name}: {str(e)}"
         logger.error(detailed_error)
         raise HTTPException(500, detail=detailed_error)
- 
-@app.post("/execute-queries/{container_name}/{file_name}")
-def execute_stored_queries(container_name: str, file_name: str):
-    """Execute pre-tested queries, store invalid records in DQM, and return results with invalid data."""
-    try:
-        file_base_name = file_name.split('.')[0].lower()
-        table_name = f"data_{file_base_name.replace('-', '_')}"
-        tracker = QueryTracker(output_dir=f"query_logs/{file_base_name}")
-       
-        # Use a dummy sandbox engine since we only need main_engine here
-        query_generator = SQLQueryGenerator(
-            create_engine("postgresql://postgres:Lakshmeesh@localhost:5432/DQM-sandbox"),
-            tracker
-        )
-        execution_results = query_generator.store_invalid_records(table_name)
-       
-        # Fetch invalid records from the invalid_records_table
-        invalid_table_name = f"invalid_records_{table_name}"
-        invalid_data = []
-        try:
-            with query_generator.main_engine.connect() as conn:
-                result = conn.execute(text(f"SELECT surrogate_key, invalid_column, invalid_value FROM {invalid_table_name}"))
-                invalid_data = [
-                    {
-                        "surrogate_key": row["surrogate_key"],
-                        "invalid_column": row["invalid_column"],
-                        "invalid_value": row["invalid_value"]
-                    }
-                    for row in result.mappings()
-                ]
-        except SQLAlchemyError as e:
-            logger.warning(f"Could not fetch invalid records from {invalid_table_name}: {str(e)}")
 
-        # Prepare the response
-        results = {
-            "successful_executions": execution_results["successful_executions"],
-            "failed_executions": execution_results["failed_executions"],
-            "invalid_data": invalid_data,  # Add invalid records to response
-            "execution_logs": []
-        }
-       
-        # Load execution logs if available
-        log_path = tracker.output_dir / "query_generation.log"
-        if log_path.exists():
-            with open(log_path, "r") as f:
-                results["execution_logs"] = f.readlines()
-       
-        return JSONResponse({"status": "success", "results": results})
-   
-    except Exception as e:
-        detailed_error = f"Query execution error for {file_name}: {str(e)}"
-        logger.error(detailed_error)
-        raise HTTPException(500, detail=detailed_error)
-   
 @app.post("/validate-data/{container_name}/{file_name}")
-async def validate_data(container_name: str, file_name: str):
-    """Read, pivot invalid records, correct them with LLM, and return refactored results."""
+async def validate_data(container_name: str, file_name: str, provider: str = "aws"):
+    """Read, pivot invalid records, correct them with LLM, update the original table, and return refactored results."""
     try:
         file_base_name = file_name.split('.')[0].lower()
         table_name = f"data_{file_base_name.replace('-', '_')}"
         tracker = QueryTracker(output_dir=f"query_logs/{file_base_name}")
        
-        async with DataValidator(table_name, container_name, file_name) as validator:
+        async with DataValidator(table_name, provider, container_name, file_name) as validator:
             start_time = time.time()
-            pivoted_data = validator.read_and_pivot_invalid_records()
-            corrected_data = await validator.correct_invalid_records(pivoted_data)
+            
+            # Start both operations in parallel
+            pivoted_data_task = asyncio.create_task(asyncio.to_thread(validator.read_and_pivot_invalid_records))
+            
+            # Wait for pivot data to complete
+            pivoted_data = await pivoted_data_task
+            
+            # Process and update records
+            successful_validation = await validator.correct_invalid_records(pivoted_data)
+            
+            # Generate corrected dataset asynchronously while returning the response
+            corrected_dataset_task = asyncio.create_task(asyncio.to_thread(validator.generate_corrected_dataset))
+            
+            # Upload the dataset in the background (don't await completion)
+            new_file_name = f"corrected_{file_name}"
+            asyncio.create_task(validator.upload_corrected_dataset_to_source(new_file_name))
+            
+            # Wait for corrected dataset to be ready
+            corrected_dataset = await corrected_dataset_task
            
+            execution_time = time.time() - start_time
+            logger.info(f"Total execution time: {execution_time:.2f} seconds")
+            
             results = {
                 "pivoted_data": pivoted_data,
-                "successful_validation": corrected_data,
+                "successful_validation": successful_validation,
+                "corrected_dataset": corrected_dataset,
                 "execution_logs": [],
-                "execution_time": f"{time.time() - start_time:.2f} seconds"
+                "execution_time": f"{execution_time:.2f} seconds"
             }
            
             log_path = tracker.output_dir / "query_generation.log"
@@ -784,10 +847,30 @@ async def validate_data(container_name: str, file_name: str):
         detailed_error = f"Data validation error for {file_name}: {str(e)}"
         logger.error(detailed_error)
         raise HTTPException(500, detail=detailed_error)
+
+@app.post("/upload-corrected/{provider}/{container_name}/{file_name}")
+async def upload_corrected_dataset(provider: str, container_name: str, file_name: str, request: UploadRequest):
+    """Upload the corrected dataset back to the original source with .csv appended."""
+    try:
+        file_base_name = file_name.split('.')[0].lower()
+        table_name = f"data_{file_base_name.replace('-', '_')}"
+        new_file_name = f"{request.new_file_name}.csv"  # Append .csv automatically
+        
+        validator = DataValidator(table_name, provider, container_name, file_name)
+        validator.upload_corrected_dataset_to_source(new_file_name)
+        
+        return JSONResponse({
+            "status": "success",
+            "message": f"Corrected dataset uploaded as {new_file_name} to {provider} {container_name}"
+        })
+    except Exception as e:
+        detailed_error = f"Error uploading corrected dataset for {file_name}: {str(e)}"
+        logger.error(detailed_error)
+        raise HTTPException(500, detail=detailed_error)
  
 if __name__ == "__main__":
     import nest_asyncio
     import uvicorn
     logging.basicConfig(level=logging.DEBUG)
-    nest_asyncio.apply()  # Allow running async in Jupyter/IPython if needed
+    nest_asyncio.apply() 
     uvicorn.run(app, host="0.0.0.0", port=8000)

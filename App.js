@@ -14,8 +14,7 @@ import {
   addRule, 
   deleteRule,
   fetchRulesFromDirectory,
-  generateInvalidDataQueries,
-  executeStoredQueries,
+  processAndExecuteQueries,
   uploadCorrectedDataset
 } from './api/api'; // For API calls, including fetchRulesFromDirectory
 import './styles/global.css'; // Import global styles
@@ -610,7 +609,7 @@ function RulesPage({ selectedOption, selectedContainer, selectedFileForRules, se
   const [hoveredRule, setHoveredRule] = useState(null);
   const [showAddRuleInput, setShowAddRuleInput] = useState(null);
   const [newRuleText, setNewRuleText] = useState('');
-  const [queryLoading, setQueryLoading] = useState(false);
+  const [processLoading, setProcessLoading] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -663,22 +662,22 @@ function RulesPage({ selectedOption, selectedContainer, selectedFileForRules, se
     };
   }, [selectedOption, selectedContainer, selectedFileForRules, location.state, navigate]);
 
-  const handleGenerateQueries = async () => {
+  const handleProcessAndExecute = async () => {
     if (!selectedOption || !selectedContainer || !selectedFileForRules) {
-      alert("Missing required parameters for query generation.");
+      alert("Missing required parameters for processing.");
       return;
     }
-    setQueryLoading(true);
+    setProcessLoading(true);
     try {
-      const results = await generateInvalidDataQueries(selectedOption, selectedContainer, selectedFileForRules);
-      navigate(`/${selectedOption}/container/${selectedContainer}/file/${selectedFileForRules}/query-results`, {
-        state: { queryResults: results }
+      const results = await processAndExecuteQueries(selectedOption, selectedContainer, selectedFileForRules);
+      navigate(`/${selectedOption}/container/${selectedContainer}/file/${selectedFileForRules}/execution-results`, {
+        state: { executionResponse: { results } }
       });
     } catch (error) {
-      console.error("Query generation error:", error);
-      alert(error.message || "Failed to generate invalid data queries");
+      console.error("Processing error:", error);
+      alert(error.message || "Failed to process and execute queries");
     } finally {
-      setQueryLoading(false);
+      setProcessLoading(false);
     }
   };
 
@@ -979,152 +978,17 @@ function RulesPage({ selectedOption, selectedContainer, selectedFileForRules, se
 
           <div className="actions">
             <button
-              className="primary-button generate-sql-button"
-              onClick={handleGenerateQueries}
-              disabled={queryLoading}
+              className="primary-button process-execute-button"
+              onClick={handleProcessAndExecute}
+              disabled={processLoading}
             >
-              {queryLoading ? 'Generating Queries...' : 'Generate Queries'}
+              {processLoading ? 'Processing...' : 'Display All Invalid Records'}
             </button>
           </div>
         </div>
       </div>
     </div>
   );
-}
-
-function QueryResultsPage() {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const queryResults = location.state?.queryResults;
-
-  const pathSegments = location.pathname.split('/');
-  const fileName = pathSegments[pathSegments.length - 2]; // Second-to-last segment
-  const containerName = pathSegments[pathSegments.length - 4]; // Fourth-to-last segment
-
-  const handleBack = () => {
-    navigate(-1); // Go back to RulesPage
-  };
-
-  const handleExecuteQueries = async () => {
-    try {
-      const response = await executeStoredQueries(containerName, fileName);
-      navigate(`/${pathSegments[1]}/container/${containerName}/file/${fileName}/execution-results`, {
-        state: { executionResponse: response }
-      });
-    } catch (error) {
-      console.error('Execution error:', error);
-      navigate(`/${pathSegments[1]}/container/${containerName}/file/${fileName}/execution-results`, {
-        state: { executionResponse: { error: error.message || 'Failed to execute queries' } }
-      });
-    }
-  };
-
-  if (!queryResults) {
-    return (
-      <div className="query-results-page">
-        <div className="no-results-container">
-          <p className="no-results">No query results available.</p>
-          <button className="back-button" onClick={handleBack}>
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M15 18l-6-6 6-6" />
-            </svg>
-            Back to Rules
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="query-results-page">
-      <header className="page-header">
-        <h2 className="page-title">Query Results for {fileName}</h2>
-        <button className="back-button" onClick={handleBack}>
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="20"
-            height="20"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M15 18l-6-6 6-6" />
-          </svg>
-          Back to Rules
-        </button>
-      </header>
-
-      <div className="results-container">
-        <section className="query-section successful-queries">
-          <h3>Successful Queries</h3>
-          {queryResults.successful_queries && Object.keys(queryResults.successful_queries).length > 0 ? (
-            <div className="queries-list">
-              {Object.entries(queryResults.successful_queries).map(([column, query]) => (
-                <div key={column} className="query-card">
-                  <h4 className="query-column">{column}</h4>
-                  <pre className="sql-code">{formatSQLQuery(query)}</pre>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <p className="no-data">No successful queries generated.</p>
-          )}
-        </section>
-
-        {queryResults.failed_queries && Object.keys(queryResults.failed_queries).length > 0 && (
-          <section className="query-section failed-queries">
-            <h3>Failed Queries</h3>
-            <div className="queries-list">
-              {Object.entries(queryResults.failed_queries).map(([column, error]) => (
-                <div key={column} className="query-card error-card">
-                  <h4 className="query-column">{column}</h4>
-                  <pre className="error-message">{error}</pre>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-
-        <div className="execution-actions">
-          <button className="execute-button" onClick={handleExecuteQueries}>
-            Execute Queries
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function formatSQLQuery(query) {
-  return query
-    .replace(/\s+/g, ' ')
-    .replace(/SELECT\s*\*/gi, 'SELECT *')
-    .replace(/FROM/gi, '\nFROM')
-    .replace(/WHERE/gi, '\nWHERE')
-    .replace(/OR/gi, '\n   OR')
-    .replace(/AND/gi, '\n   AND')
-    .replace(/NOT\s+IN/gi, 'NOT IN')
-    .replace(/GROUP\s+BY/gi, '\nGROUP BY')
-    .replace(/HAVING/gi, '\nHAVING')
-    .replace(/CAST\s*\(/gi, 'CAST(')
-    .replace(/\s*\(\s*/g, ' (')
-    .replace(/\s*\)\s*/g, ')')
-    .replace(/,\s*/g, ', ')
-    .replace(/;/g, ';\n')
-    .trim();
 }
 
 function ExecutionResultsPage() {
@@ -1135,7 +999,7 @@ function ExecutionResultsPage() {
   const [newRuleText, setNewRuleText] = useState('');
   const [selectedColumn, setSelectedColumn] = useState('');
   const [ruleLoading, setRuleLoading] = useState(false);
-  const [isLoading, setIsLoading] = useState(false); // New state for loading overlay
+  const [isLoading, setIsLoading] = useState(false);
   const [filters, setFilters] = useState({
     surrogate_key: '',
     invalid_column: '',
@@ -1147,7 +1011,7 @@ function ExecutionResultsPage() {
   const containerName = pathSegments[pathSegments.length - 4];
 
   const handleBack = () => {
-    navigate(-1);
+    navigate(`/${pathSegments[1]}/container/${containerName}/file/${fileName}/rules`);
   };
 
   const handleAddRuleClick = () => {
@@ -1183,20 +1047,17 @@ function ExecutionResultsPage() {
   };
 
   const handleCorrectInvalidRecords = async () => {
-    setIsLoading(true); // Show loading overlay
-    
+    setIsLoading(true);
     try {
-      // Simulate a delay to show the loading state
       await new Promise(resolve => setTimeout(resolve, 3000));
-      
       const response = await validateData(containerName, fileName);
-      setIsLoading(false); // Hide loading overlay
+      setIsLoading(false);
       navigate(`/${pathSegments[1]}/container/${containerName}/file/${fileName}/validation-results`, {
         state: { validationResponse: response }
       });
     } catch (error) {
       console.error('Validation error:', error);
-      setIsLoading(false); // Hide loading overlay
+      setIsLoading(false);
       navigate(`/${pathSegments[1]}/container/${containerName}/file/${fileName}/validation-results`, {
         state: { validationResponse: { error: error.message || 'Failed to validate data' } }
       });
@@ -1216,7 +1077,7 @@ function ExecutionResultsPage() {
         <div className="no-results-container">
           <p className="no-results">No execution results available.</p>
           <button className="back-button" onClick={handleBack}>
-            Back to Query Results
+            Back to Rules
           </button>
         </div>
       </div>
@@ -1226,7 +1087,6 @@ function ExecutionResultsPage() {
   const invalidData = executionResponse.results?.invalid_data || [];
   const uniqueColumns = [...new Set(invalidData.map(item => item.invalid_column))];
 
-  // Filter the data based on user input
   const filteredData = invalidData.filter(row =>
     String(row.surrogate_key).toLowerCase().includes(filters.surrogate_key) &&
     String(row.invalid_column).toLowerCase().includes(filters.invalid_column) &&
@@ -1235,9 +1095,7 @@ function ExecutionResultsPage() {
 
   return (
     <div className="execution-results-page">
-      {/* Loading Overlay */}
       <LoadingOverlay isVisible={isLoading} />
-      
       <header className="page-header">
         <div className="header-content">
           <h2 className="page-title">Execution Results</h2>
@@ -1259,7 +1117,7 @@ function ExecutionResultsPage() {
               >
                 <path d="M15 18l-6-6 6-6" />
               </svg>
-              Back to Query Results
+              Back to Rules
             </button>
           </div>
         </div>
@@ -1646,10 +1504,6 @@ function App() {
                   setSelectedColumns={setSelectedColumns}
                 />
               }
-            />
-            <Route
-              path="/:provider/container/:containerName/file/:fileName/query-results"
-              element={<QueryResultsPage />}
             />
             <Route
               path="/:provider/container/:containerName/file/:fileName/execution-results"

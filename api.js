@@ -107,7 +107,6 @@ export const deleteRule = async (fileName, columnName, ruleIndex) => {
   }
 };
 
-// New function to fetch rules from the rules directory
 export const fetchRulesFromDirectory = async (storageOption, container, fileName) => {
   try {
     const response = await api.get(`/rules/${storageOption}/${container}/${fileName}`);
@@ -118,28 +117,10 @@ export const fetchRulesFromDirectory = async (storageOption, container, fileName
   }
 };
 
-// Add this new function to your api.js file
-export const generateInvalidDataQueries = async (selectedOption, containerName, fileName) => {
+export const processAndExecuteQueries = async (selectedOption, containerName, fileName) => {
   try {
     const response = await api.post(
-      `/invalid-data/${selectedOption}/${containerName}/${fileName}`,
-      {}, // Empty body since your endpoint doesn't need data
-      {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      }
-    );
-    return response.data.results; // Return the results portion of the response
-  } catch (error) {
-    throw new Error(error.response?.data?.message || error.message || 'Error generating queries');
-  }
-};
-
-export const executeStoredQueries = async (containerName, fileName) => {
-  try {
-    const response = await api.post(
-      `/execute-queries/${containerName}/${fileName}`,
+      `/process-and-execute-queries/${selectedOption}/${containerName}/${fileName}`,
       {},
       {
         headers: {
@@ -147,9 +128,9 @@ export const executeStoredQueries = async (containerName, fileName) => {
         },
       }
     );
-    return response.data; // Return the full response (including status and results)
+    return response.data.results;
   } catch (error) {
-    throw new Error(error.response?.data?.detail || error.message || 'Error executing queries');
+    throw new Error(error.response?.data?.detail || error.message || 'Error processing and executing queries');
   }
 };
 

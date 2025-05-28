@@ -268,28 +268,37 @@ class DataValidator:
  
     def parse_llm_response(self, content: str) -> Dict[str, Dict]:
         """Parse LLM response into a corrected structure with better type handling."""
+        logger.debug(f"Raw LLM response: {content}")
+        
         if not content or content.strip() == "":
             logger.warning("Empty response from LLM")
             return {"corrections": {}}
-    
+        
         try:
-            # Try to extract JSON if it's embedded in text
+            # Remove code block markers if present
+            content = content.strip().strip('```json').strip('```').strip()
+            
+            # Try to extract JSON if embedded
             if not content.strip().startswith('{'):
                 import re
                 json_match = re.search(r'({.*})', content, re.DOTALL)
                 if json_match:
                     content = json_match.group(1)
-                    
+                    logger.debug(f"Extracted JSON content: {content}")
+            
+            # Parse JSON
             result = json.loads(content)
+            
+            # Validate structure
             if not isinstance(result, dict) or "corrections" not in result:
-                logger.error(f"Invalid JSON structure, expected 'corrections': {content}")
-                raise ValueError("Response must have a 'corrections' key")
+                logger.error(f"Invalid JSON structure, expected 'corrections' key: {result}")
+                return {"corrections": {}}
             
             corrections = result["corrections"]
             if not isinstance(corrections, dict):
                 logger.error(f"Corrections must be a dictionary: {corrections}")
                 return {"corrections": {}}
-                
+            
             # Validate and clean each entry
             valid_corrections = {}
             for key, val in corrections.items():
@@ -305,13 +314,15 @@ class DataValidator:
                 corrected_value = val["corrected_value"]
                 if corrected_value in ["NULL", "null", None, ""]:
                     corrected_value = ""
-                    
+                
                 valid_corrections[key] = {
                     "corrected_value": corrected_value,
                     "reason": val["reason"]
                 }
-                
+            
+            logger.debug(f"Parsed corrections: {valid_corrections}")
             return {"corrections": valid_corrections}
+        
         except json.JSONDecodeError as e:
             logger.error(f"JSON parse failed: {str(e)}. Raw content: {content}")
             return {"corrections": {}}

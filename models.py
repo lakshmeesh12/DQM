@@ -95,21 +95,52 @@ class SQLQueryGenerator:
         self.metadata = MetaData()
 
     @staticmethod
-    def _extract_sql_query(response: str) -> str:
+    def _extract_sql_query(response: Any) -> str:
+        """Extract SQL query from LLM response, handling both string and dictionary formats."""
+        logger.debug(f"Extracting SQL query from response type: {type(response)}")
+        
+        # Convert response to string if it's a dictionary
+        if isinstance(response, dict):
+            # Try common keys where the query might be
+            content = response.get('query') or response.get('sql') or response.get('content') or str(response)
+            logger.debug(f"Extracted content from dict: {content}")
+        else:
+            content = str(response)  # Ensure string for non-dict responses
+            logger.debug(f"Using response as string: {content}")
+        
+        # Remove code block markers if present
+        content = content.strip().strip('```sql').strip('```').strip()
+        
+        # Try extracting query using markers
         markers = [('SELECT', ';'), ('SELECT', '\n\n'), ('SELECT', '--')]
         for start_marker, end_marker in markers:
             try:
-                start_idx = response.find(start_marker)
+                start_idx = content.find(start_marker)
                 if start_idx != -1:
-                    end_idx = response.find(end_marker, start_idx)
+                    end_idx = content.find(end_marker, start_idx)
                     if end_idx != -1:
-                        return response[start_idx:end_idx + 1 if end_marker == ';' else end_idx]
-            except Exception:
+                        query = content[start_idx:end_idx + 1 if end_marker == ';' else end_idx]
+                        logger.debug(f"Extracted query with markers: {query}")
+                        return query
+            except Exception as e:
+                logger.debug(f"Failed to extract with markers {start_marker}-{end_marker}: {str(e)}")
                 continue
-        query_lines = [line.strip() for line in response.split('\n') if line.strip() and 
-                       not line.startswith('--') and not line.lower().startswith(('below', 'explanation')) and 
-                       not line.startswith('-----')]
-        return ' '.join(query_lines)
+        
+        # Fallback: Filter lines to build query
+        query_lines = []
+        for line in content.split('\n'):
+            line = line.strip()
+            # Skip empty lines, comments, or explanation headers
+            if (line and 
+                not line.startswith('--') and 
+                not line.lower().startswith(('below', 'explanation', 'note')) and 
+                not line.startswith('-----')):
+                query_lines.append(line)
+        
+        query = ' '.join(query_lines).strip()
+        logger.debug(f"Final extracted query: {query}")
+        
+        return query
 
     @staticmethod
     def _get_column_type(engine, table_name: str, column_name: str) -> str:
@@ -167,10 +198,12 @@ class SQLQueryGenerator:
                         {"role": "user", "content": prompt}
                     ]
                 )
-                llm_response = response.choices[0].message.content.strip()
+                # Extract content from response
+                llm_response = response.choices[0].message.content
+                logger.debug(f"Raw LLM response: {llm_response}")
                 raw_query = self._extract_sql_query(llm_response)
                 processed_query = self._process_query(raw_query, table_name, column_name, 
-                                                     self.sandbox_engine, sample_data, rules)
+                                                    self.sandbox_engine, sample_data, rules)
                 current_attempt = QueryAttempt(
                     column_name=column_name,
                     rules=rules,

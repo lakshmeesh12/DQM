@@ -797,7 +797,6 @@ def process_and_execute_queries(selected_option: str, container_name: str, file_
 
 @app.post("/validate-data/{container_name}/{file_name}")
 async def validate_data(container_name: str, file_name: str, provider: str = "aws"):
-    """Read, pivot invalid records, correct them with LLM, update the original table, and return refactored results."""
     try:
         file_base_name = file_name.split('.')[0].lower()
         table_name = f"data_{file_base_name.replace('-', '_')}"

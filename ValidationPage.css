@@ -19,14 +19,6 @@
   position: relative;
 }
 
-.logo {
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 120px;
-  height: auto;
-}
-
 .header-content {
   display: flex;
   flex-direction: column;
@@ -36,7 +28,7 @@
 
 .header-actions {
   display: flex;
-  flex-wrap: wrap; /* Allow wrapping for smaller screens */
+  flex-wrap: wrap;
   gap: 15px;
 }
 
@@ -92,7 +84,7 @@
   font-size: 14px;
   color: #1a1a1a;
   background: #ffffff;
-  width: 250px; /* Fixed width for consistency */
+  width: 250px;
   transition: border-color 0.3s ease;
 }
 
@@ -161,16 +153,16 @@
 /* Corrected Dataset Table */
 .corrected-dataset-table {
   width: 100%;
-  overflow-x: auto; /* Enables horizontal scrolling */
+  overflow-x: auto;
   max-height: 500px;
-  overflow-y: auto; /* Vertical scrolling if needed */
-  -webkit-overflow-scrolling: touch; /* Smooth scrolling on touch devices */
-  scrollbar-width: thin; /* Thinner scrollbar (Firefox) */
-  scrollbar-color: #0066cc #e6e6e6; /* Custom scrollbar color (Firefox) */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: #0066cc #e6e6e6;
 }
 
 .corrected-dataset-table::-webkit-scrollbar {
-  height: 8px; /* Thinner horizontal scrollbar (Chrome/Safari) */
+  height: 8px;
 }
 
 .corrected-dataset-table::-webkit-scrollbar-track {
@@ -188,13 +180,13 @@
 
 .corrected-dataset-table table {
   width: 100%;
-  min-width: 1000px; /* Forces horizontal scroll if content exceeds viewport */
+  min-width: 1200px; /* Increased to ensure scrolling */
   border-collapse: collapse;
   background: #ffffff;
   border-radius: 10px;
   overflow: hidden;
   box-shadow: 0 4px 15px rgba(0, 0, 0, 0.05);
-  table-layout: auto; /* Allows columns to size based on content */
+  table-layout: auto;
 }
 
 .corrected-dataset-table th,
@@ -203,10 +195,10 @@
   text-align: left;
   border-bottom: 1px solid rgba(0, 102, 204, 0.2);
   font-size: 14px;
-  white-space: nowrap; /* Prevents text wrapping */
+  white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 200px; /* Limits column width, adjust as needed */
+  /* Removed max-width to allow natural sizing */
 }
 
 .corrected-dataset-table th {
@@ -263,31 +255,23 @@
 /* Column Validation */
 .column-validation {
   margin-bottom: 20px;
-}
-
-.column-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: #0066cc;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  margin-bottom: 10px;
+  width: 100%; /* Ensure it doesn’t constrain child */
 }
 
 /* Validation Table (Multiple Tables in Successful Validations) */
 .validation-table {
   width: 100%;
-  overflow-x: auto; /* Enables horizontal scrolling for each table */
+  overflow-x: auto; /* Must allow horizontal scrolling */
   max-height: 400px;
-  overflow-y: auto; /* Vertical scrolling if needed */
-  -webkit-overflow-scrolling: touch; /* Smooth scrolling on touch devices */
-  scrollbar-width: thin; /* Thinner scrollbar (Firefox) */
-  scrollbar-color: #0066cc #e6e6e6; /* Custom scrollbar color (Firefox) */
-  margin-bottom: 15px; /* Space between tables */
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  scrollbar-color: #0066cc #e6e6e6;
+  margin-bottom: 15px;
 }
 
 .validation-table::-webkit-scrollbar {
-  height: 8px; /* Thinner horizontal scrollbar (Chrome/Safari) */
+  height: 8px;
 }
 
 .validation-table::-webkit-scrollbar-track {
@@ -305,13 +289,13 @@
 
 .validation-table table {
   width: 100%;
-  min-width: 800px; /* Forces horizontal scroll for each table */
+  min-width: 1200px; /* Increased to force horizontal scrolling */
   border-collapse: collapse;
   background: #ffffff;
   border-radius: 8px;
   overflow: hidden;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
-  table-layout: auto; /* Allows columns to size based on content */
+  table-layout: auto;
 }
 
 .validation-table th,
@@ -320,10 +304,10 @@
   text-align: left;
   border-bottom: 1px solid rgba(0, 102, 204, 0.2);
   font-size: 12px;
-  white-space: nowrap; /* Prevents text wrapping */
+  white-space: nowrap; /* Prevents wrapping */
   overflow: hidden;
   text-overflow: ellipsis;
-  max-width: 200px; /* Limits column width, adjust as needed */
+  /* Removed max-width to allow natural sizing */
 }
 
 .validation-table th {
@@ -396,7 +380,7 @@
   margin-top: 10px;
 }
 
-/* Add smoother scrolling for the entire page */
+/* Smooth scrolling for page */
 html, body {
   scroll-behavior: smooth;
   overflow-x: hidden;
@@ -429,14 +413,6 @@ html, body {
     font-size: 13px;
   }
 
-  .column-title {
-    font-size: 14px;
-  }
-
-  .validation-summary p {
-    font-size: 11px;
-  }
-
   .back-button,
   .download-button,
   .upload-source-button {
@@ -460,20 +436,15 @@ html, body {
     font-size: 13px;
   }
 
-  .logo {
-    width: 100px;
-  }
-
   .header-actions {
     gap: 10px;
   }
 
-  /* Ensure tables remain scrollable on smaller screens */
   .corrected-dataset-table table {
-    min-width: 800px; /* Adjusted for smaller screens */
+    min-width: 1000px; /* Still forces scroll on small screens */
   }
 
   .validation-table table {
-    min-width: 600px; /* Adjusted for smaller screens */
+    min-width: 1000px; /* Still forces scroll on small screens */
   }
 }

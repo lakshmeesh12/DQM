@@ -1,0 +1,62 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: backend-base
+    ports:
+      - "8000:8000"
+    env_file:
+      - backend/.env
+    environment:
+      - DATABASE_URL=postgresql://postgres:Lakshmeesh@db:5432/DQM
+      - SANDBOX_DATABASE_URL=postgresql://postgres:Lakshmeesh@db:5432/DQM-sandbox
+      - ENVIRONMENT=development
+    volumes:
+      - ./backend:/app/backend
+      - ./backend/rules:/app/backend/rules
+      - ./backend/query_logs:/app/backend/query_logs
+      - ./backend/Uploads:/app/backend/Uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - dqm-network
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: frontend
+    ports:
+      - "80:80"
+    environment:
+      - REACT_APP_API_URL=http://backend:8000
+    depends_on:
+      - backend
+    networks:
+      - dqm-network
+
+  db:
+    image: postgres:16
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=Lakshmeesh
+      - POSTGRES_MULTIPLE_DATABASES=DQM,DQM-sandbox
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sh:/docker-entrypoint-initdb.d/init-db.sh
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - dqm-network
+
+volumes:
+  postgres_data:
+
+networks:
+  dqm-network:
+    driver: bridge

@@ -183,47 +183,60 @@ class DataValidator:
             
         today_str = self.today
 
-        # Identify common patterns in the data for more efficient prompting
+        # Identify common patterns
         patterns = self._identify_patterns(chunk)
         pattern_info = ""
         if patterns:
             pattern_info = "COMMON PATTERNS DETECTED:\n" + "\n".join([f"- {p}" for p in patterns])
 
-        return f"""CRITICAL DATA CORRECTION TASK: You MUST correct ALL invalid data for column '{column}' based on the rules provided. Your goal is 100% correction rate.
- 
+        # Build rule-specific instructions
+        rules_str = json.dumps(rules.get('rules', []), indent=2)
+        rules_instructions = ""
+        for rule in rules.get('rules', []):
+            if "date" in rule.lower() or "datetime" in rule.lower():
+                rules_instructions += (
+                    "- Convert ALL date/datetime values to YYYY-MM-DD format with numerical months (e.g., '02' for February).\n"
+                    "- Handle month names (e.g., 'Feb', 'March'), misspellings (e.g., 'jaan' → 'Jan'), and irregular separators (e.g., '=', '()').\n"
+                    "- Examples: 'feb-12-2024' → '2024-02-12', '01=12=2024' → '2024-12-01', '2024-23-feb' → '2024-02-23'.\n"
+                    "- Remove time components.\n"
+                    "- Reject dates after {today_str}.\n"
+                )
+            if "positive" in rule.lower():
+                rules_instructions += "- Ensure numeric values are positive.\n"
+            if "uppercase" in rule.lower():
+                rules_instructions += "- Convert text to uppercase.\n"
+            if "lowercase" in rule.lower():
+                rules_instructions += "- Convert text to lowercase.\n"
+            if "capitalize" in rule.lower():
+                rules_instructions += "- Capitalize text.\n"
+
+        return f"""CRITICAL DATA CORRECTION TASK: You MUST correct ALL invalid data for column '{column}' by strictly applying the provided rules. Your goal is 100% correction rate.
+
     INVALID RECORDS TO CORRECT:
     {invalid_records}
-    
+
     {pattern_info}
- 
+
     DATA QUALITY RULES:
-    {json.dumps(rules.get('rules', []), indent=2)}
- 
-    CORRECTION INSTRUCTIONS:
-    1. YOU MUST CORRECT EVERY SINGLE RECORD! This is a business-critical requirement.
- 
-    2. For DATE values:
-    - ALWAYS convert to YYYY-MM-DD format
-    - For DD-MM-YYYY formats (like "11-01-2025"), convert to "2025-01-11"
-    - For dates with time (like "11-01-2025 11:52"), extract only the date part and convert
-    - Reject only if the date is in the future (after {today_str})
-    - Apply these rules strictly across all date entries
- 
+    {rules_str}
+
+    SPECIFIC CORRECTION INSTRUCTIONS:
+    {rules_instructions}
+    1. Apply ALL rules to EVERY record.
+    2. For DATE/DATETIME values:
+    - Standardize to YYYY-MM-DD with numerical months (e.g., '02' for Feb, '03' for March).
+    - Parse month names, abbreviations, or misspellings (e.g., 'jaan' → 'Jan' → '01').
+    - Handle irregular formats (e.g., '01=12=2024', '30(10)2024').
+    - Remove time components.
+    - Reject dates after {today_str}.
     3. For NUMERIC values:
-    - Strip any non-numeric characters
-    - Make negative numbers positive if rules specify "positive integer"
-    - Ensure the result is a valid number that preserves the original intent
- 
+    - Remove non-numeric characters.
+    - Convert negative numbers to positive if rules specify 'positive'.
     4. For TEXT/ID values:
-    - Normalize format according to rules (uppercase, lowercase, capitalize)
-    - Preserve the core identifying information
- 
-    5. DO NOT leave any record uncorrected unless absolutely impossible to fix.
- 
-    6. ALWAYS include a brief reason for each correction.
-    
-    7. Apply the same correction logic to ALL {total_count} records, including those not shown above.
- 
+    - Apply case transformations per rules.
+    5. Provide a brief reason for each correction, referencing the rule.
+    6. Apply corrections to ALL {total_count} records.
+
     EXPECTED RESPONSE FORMAT:
     {{
     "corrections": {{
@@ -234,8 +247,8 @@ class DataValidator:
         ...additional keys...
     }}
     }}
- 
-    IMPORTANT: Your performance is measured by how many records you correctly fix. You must maximize your correction rate while following the rules. Do not give up on any record that can be reasonably interpreted and fixed."""
+
+    Maximize corrections while strictly following rules."""
 
     def _identify_patterns(self, records):
         """Identify common patterns in the data to help the LLM batch process efficiently"""
@@ -275,10 +288,10 @@ class DataValidator:
             return {"corrections": {}}
         
         try:
-            # Remove code block markers if present
+            # Remove code block markers
             content = content.strip().strip('```json').strip('```').strip()
             
-            # Try to extract JSON if embedded
+            # Extract JSON if embedded
             if not content.strip().startswith('{'):
                 import re
                 json_match = re.search(r'({.*})', content, re.DOTALL)
@@ -310,7 +323,6 @@ class DataValidator:
                     logger.warning(f"Skipping malformed entry for key {key}: {val}")
                     continue
                 
-                # Handle None/NULL values
                 corrected_value = val["corrected_value"]
                 if corrected_value in ["NULL", "null", None, ""]:
                     corrected_value = ""
@@ -329,7 +341,7 @@ class DataValidator:
         except Exception as e:
             logger.error(f"Unexpected parse error: {str(e)}. Raw content: {content}")
             return {"corrections": {}}
- 
+    
     async def correct_invalid_records(self, pivoted_data: Dict[str, List[Dict]]) -> Dict[str, Dict]:
         """Process records, correct based on rules, and add summary."""
         results = {}
@@ -432,6 +444,7 @@ class DataValidator:
     def _fallback_correct(self, invalid_value: str, column: str) -> tuple[str, str]:
         """Fallback correction logic based on rules for unprocessed records."""
         rules = self.column_rules_cache.get(column, {}).get('rules', {'rules': []})
+        rules_list = rules.get('rules', [])
         
         # Get column data type from the database
         column_type = None
@@ -442,88 +455,127 @@ class DataValidator:
                 if column_info:
                     column_type = column_info[0].lower()
         except Exception:
-            pass  # Silently continue if we can't determine the type
+            logger.warning(f"Could not determine column type for {column}")
         
         if invalid_value in ["NULL", "", None]:
             return "", "Cannot correct NULL/empty based on rules"
-    
-        if column.lower() == "date" or column_type in ["date", "timestamp", "timestamp without time zone"]:
+        
+        # Check if column is date-like based on name, type, or rules
+        is_date_column = (
+            column.lower() in ["date", "datetime", "transactiondatetime"] or
+            column_type in ["date", "timestamp", "timestamp without time zone"] or
+            any("date" in rule.lower() or "datetime" in rule.lower() for rule in rules_list)
+        )
+        
+        if is_date_column:
             try:
                 from datetime import datetime
+                from dateutil import parser
                 today = datetime.strptime(self.today, '%Y-%m-%d')
-                date_str = invalid_value.split(" ")[0] if " " in invalid_value else invalid_value
-            
-                date_obj = None
-                formats_to_try = ['%d-%m-%Y', '%m-%d-%Y', '%Y-%m-%d', '%d/%m/%Y', '%m/%d/%Y', '%Y/%m/%d', '%d.%m.%Y']
+                
+                # Preprocess input
+                cleaned_value = invalid_value.lower().strip()
+                # Remove time component
+                if " " in cleaned_value:
+                    cleaned_value = cleaned_value.split(" ")[0]
+                # Normalize separators
+                for sep in ['=', '(', ')', ':', ';']:
+                    cleaned_value = cleaned_value.replace(sep, '-')
+                # Fix common misspellings
+                month_corrections = {
+                    'jaan': 'jan', 'febr': 'feb', 'mar': 'march', 'apr': 'april',
+                    'jun': 'june', 'jul': 'july', 'aug': 'august', 'sep': 'sept',
+                    'oct': 'october', 'nov': 'november', 'dec': 'december'
+                }
+                for wrong, correct in month_corrections.items():
+                    cleaned_value = cleaned_value.replace(wrong, correct)
+                
+                # Try parsing with dateutil
+                try:
+                    date_obj = parser.parse(cleaned_value, dayfirst=False, yearfirst=False)
+                    if date_obj.date() > today.date():
+                        return invalid_value, "Cannot correct due to future date per rules"
+                    corrected_date = date_obj.strftime('%Y-%m-%d')
+                    return corrected_date, f"Corrected to {corrected_date} in YYYY-MM-DD format per rules"
+                except ValueError:
+                    pass
+                
+                # Try strict formats
+                formats_to_try = [
+                    '%d-%m-%Y', '%m-%d-%Y', '%Y-%m-%d', 
+                    '%d/%m/%Y', '%m/%d/%Y', '%Y/%m/%d', 
+                    '%d.%m.%Y', '%m.%d.%Y', '%Y.%m.%d',
+                    '%B-%d-%Y', '%b-%d-%Y', '%Y-%d-%B', '%Y-%d-%b'
+                ]
                 for fmt in formats_to_try:
                     try:
-                        date_obj = datetime.strptime(date_str, fmt)
+                        date_obj = datetime.strptime(cleaned_value, fmt)
+                        if date_obj.date() > today.date():
+                            return invalid_value, "Cannot correct due to future date per rules"
                         corrected_date = date_obj.strftime('%Y-%m-%d')
-                        break
+                        return corrected_date, f"Corrected to {corrected_date} in YYYY-MM-DD format per rules"
                     except ValueError:
                         continue
-            
-                if date_obj and date_obj <= today:
-                    return corrected_date, f"Corrected to {corrected_date} based on YYYY-MM-DD format per rules"
-                return invalid_value, "Cannot correct due to invalid or future date per rules"
+                
+                return invalid_value, "Cannot correct due to invalid date format"
             except Exception as e:
+                logger.warning(f"Date correction failed for {invalid_value}: {str(e)}")
                 return invalid_value, f"Cannot correct date: {str(e)}"
-    
+        
         elif column.lower() in ["sales_id", "product"]:
-            return invalid_value.capitalize(), "corrected to capitalize based on rules"
-    
+            for rule in rules_list:
+                if "uppercase" in rule.lower():
+                    return invalid_value.upper(), "Corrected to uppercase per rules"
+                if "lowercase" in rule.lower():
+                    return invalid_value.lower(), "Corrected to lowercase per rules"
+                if "capitalize" in rule.lower():
+                    return invalid_value.capitalize(), "Corrected to capitalize per rules"
+            return invalid_value.capitalize(), "Corrected to capitalize based on default rules"
+        
         elif column_type in ["double precision", "numeric", "decimal", "real", "float"] or \
             column.lower() in ["totalsales", "units_sold", "unit_price", "quantity", "total_sales"]:
             try:
-                # Strip all non-numeric characters except decimal point and negative sign
                 cleaned_value = ''.join(c for c in invalid_value if c.isdigit() or c in '.-')
-                
-                # Handle multiple decimal points
                 if cleaned_value.count('.') > 1:
                     parts = cleaned_value.split('.')
                     cleaned_value = parts[0] + '.' + ''.join(parts[1:])
-                
-                # If completely empty after cleaning, return 0
                 if not cleaned_value or cleaned_value in ['.', '-', '-.']:
                     return "0", "Corrected to 0 due to invalid numeric value"
-                    
-                # Try to convert to float
                 try:
                     num = float(cleaned_value)
-                    if num < 0 and any("positive" in r.lower() for r in rules.get("rules", [])):
+                    if num < 0 and any("positive" in rule.lower() for rule in rules_list):
                         num = abs(num)
-                    return str(num), f"corrected to {num} per rules"
+                    return str(num), f"Corrected to {num} per rules"
                 except ValueError:
                     return "0", "Corrected to 0 due to invalid numeric value after cleaning"
-                    
             except Exception:
                 return "0", "Corrected to 0 due to non-numeric value"
-    
+        
         elif column_type in ["integer", "bigint", "smallint"]:
             try:
-                # Strip all non-numeric characters except negative sign
                 cleaned_value = ''.join(c for c in invalid_value if c.isdigit() or c == '-')
-                
-                # If starts with multiple negative signs, keep only one
                 if cleaned_value.startswith('-'):
                     cleaned_value = '-' + cleaned_value.lstrip('-')
-                
-                # If completely empty after cleaning, return 0
                 if not cleaned_value or cleaned_value == '-':
                     return "0", "Corrected to 0 due to invalid integer value"
-                    
-                # Try to convert to int
                 try:
                     num = int(cleaned_value)
-                    if num < 0 and any("positive" in r.lower() for r in rules.get("rules", [])):
+                    if num < 0 and any("positive" in rule.lower() for rule in rules_list):
                         num = abs(num)
-                    return str(num), f"corrected to {num} per rules"
+                    return str(num), f"Corrected to {num} per rules"
                 except ValueError:
                     return "0", "Corrected to 0 due to invalid integer value after cleaning"
-                    
             except Exception:
                 return "0", "Corrected to 0 due to non-integer value"
-    
+        
+        for rule in rules_list:
+            if "uppercase" in rule.lower():
+                return invalid_value.upper(), "Corrected to uppercase per rules"
+            if "lowercase" in rule.lower():
+                return invalid_value.lower(), "Corrected to lowercase per rules"
+            if "capitalize" in rule.lower():
+                return invalid_value.capitalize(), "Corrected to capitalize per rules"
+        
         return invalid_value, "Cannot correct due to no applicable rules"
     
     async def _update_column_in_table(self, column: str, column_result: Dict[str, Any]) -> None:

@@ -1,4 +1,4 @@
-#main.py
+
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,6 +29,7 @@ from datetime import time, datetime
 import uuid
 import time
 import httpx
+from typing import Dict, Any
 import asyncpg.exceptions
 from sqlalchemy.ext.asyncio import create_async_engine
 from rule import RuleAdd, RuleUpdate, SingleRuleUpdate, add_rule, delete_rule, load_rules
@@ -699,8 +700,24 @@ class UploadRequest(BaseModel):
     new_file_name: str
 
 
+async def generate_and_test_query_async(query_generator: SQLQueryGenerator, table_name: str, col_name: str, rules: Dict, sample_data: list) -> tuple:
+    """Helper function to generate and test query asynchronously"""
+    try:
+        query = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: query_generator.generate_and_test_query(
+                table_name=table_name,
+                column_name=col_name,
+                rules=rules,
+                sample_data=sample_data
+            )
+        )
+        return col_name, query, None
+    except Exception as e:
+        return col_name, None, str(e)
+
 @app.post("/process-and-execute-queries/{selected_option}/{container_name}/{file_name}")
-def process_and_execute_queries(selected_option: str, container_name: str, file_name: str):
+async def process_and_execute_queries(selected_option: str, container_name: str, file_name: str):
     try:
         file_base_name = file_name.split('.')[0].lower()
         rules_dir = os.path.join("rules", file_base_name)
@@ -719,7 +736,7 @@ def process_and_execute_queries(selected_option: str, container_name: str, file_
             'cleanup_status': False
         }
         
-        # Step 1: Generate and test queries in sandbox
+        # Step 1: Generate and test queries in sandbox concurrently
         with sandbox_engine.connect() as conn:
             sample_data = {}
             for col in inspect(sandbox_engine).get_columns(table_name):
@@ -731,25 +748,33 @@ def process_and_execute_queries(selected_option: str, container_name: str, file_
             tracker.logger.warning("No rules files found to process")
             return JSONResponse({"status": "warning", "message": "No rules files found to process", "results": results})
         
-        all_queries_successful = True
+        # Prepare tasks for concurrent query generation
+        tasks = []
         for rules_file in os.listdir(rules_dir):
             if not rules_file.endswith("_rules.json"):
                 continue
             col_name = rules_file.replace("_rules.json", "")
-            try:
-                with open(os.path.join(rules_dir, rules_file), 'r') as f:
-                    rules = json.load(f)
-                query = query_generator.generate_and_test_query(
-                    table_name=table_name,
-                    column_name=col_name,
-                    rules=rules,
-                    sample_data=sample_data.get(col_name, [])
-                )
-                results['successful_queries'][col_name] = query
-            except Exception as e:
+            with open(os.path.join(rules_dir, rules_file), 'r') as f:
+                rules = json.load(f)
+            tasks.append(generate_and_test_query_async(
+                query_generator,
+                table_name,
+                col_name,
+                rules,
+                sample_data.get(col_name, [])
+            ))
+        
+        # Execute all query generation tasks concurrently
+        query_results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        all_queries_successful = True
+        for col_name, query, error in query_results:
+            if error:
                 all_queries_successful = False
-                results['failed_queries'][col_name] = str(e)
-                tracker.logger.error(f"Failed to generate/test query for {col_name}: {str(e)}")
+                results['failed_queries'][col_name] = error
+                tracker.logger.error(f"Failed to generate/test query for {col_name}: {error}")
+            else:
+                results['successful_queries'][col_name] = query
         
         # Step 2: If all queries successful, proceed with execution on main database
         if all_queries_successful and len(results['successful_queries']) == total_rules:

@@ -8,6 +8,7 @@ from typing import List, Dict, Optional
 from dotenv import load_dotenv
 import re
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -21,7 +22,6 @@ if not OPENAI_API_KEY:
     raise ValueError("❌ OpenAI API Key is missing! Ensure OPEN_AI_KEY is set in .env.")
 
 client = openai.OpenAI(api_key=OPENAI_API_KEY)
-
 
 def detect_headers(data: str) -> bool:
     """
@@ -184,20 +184,26 @@ def detect_lookup_columns(data: str, model: str = "o3-mini") -> List[str]:
             # Get sample of unique values and their frequencies
             value_counts = df[col].value_counts().head(10)
             
+            # Check if column name suggests an entity or category
+            is_entity_or_category = any(keyword in col.lower() for keyword in 
+                ['name', 'category', 'type', 'status', 'region', 'product', 'customer'])
+            
             sample_data[col] = {
                 "unique_count": int(unique_values),
                 "unique_ratio": float(unique_ratio),
                 "sample_values": value_counts.index.tolist(),
-                "value_frequencies": value_counts.to_dict()
+                "value_frequencies": value_counts.to_dict(),
+                "is_entity_or_category": is_entity_or_category
             }
 
         prompt = f"""
         Analyze these columns and determine which ones should have lookup tables.
         A column needs a lookup table if it meets these criteria:
-        1. Has a relatively small set of distinct values (low unique ratio)
+        1. Has a relatively small set of distinct values (unique ratio < 0.5, or up to 0.8 if the column represents an entity like a name)
         2. Contains categorical or predefined options
-        3. Values should be restricted to a specific set
-        4. Represents attributes like status, category, type, etc.
+        3. Values should be restricted to a specific set for consistency or validation
+        4. Represents attributes like status, category, type, region, product, or entity names (e.g., customer names)
+        5. Columns with names containing keywords like 'name', 'category', 'type', 'status', 'region', 'product', or 'customer' are likely candidates, even with moderate unique ratios
 
         Column statistics and samples:
         {json.dumps(sample_data, indent=2)}
@@ -212,7 +218,6 @@ def detect_lookup_columns(data: str, model: str = "o3-mini") -> List[str]:
                 {"role": "system", "content": "You are a data analyst identifying columns that need lookup tables."},
                 {"role": "user", "content": prompt}
             ],
-            
             response_format={"type": "json_object"}
         )
 
@@ -292,10 +297,9 @@ def generate_column_stats(df, column_name, column_type):
         
     return stats
 
-
 def validate_lookup_tables(lookup_tables: Dict[str, List[str]], model: str = "o3-mini") -> Dict[str, List[str]]:
     """
-    Validate lookup table values against their column names using LLM to ensure relevancy.
+    Validate lookup table values against their column names using LLM to ensure relevancy, with parallel processing.
     
     Args:
         lookup_tables (Dict[str, List[str]]): Original lookup tables with column names and their values
@@ -309,10 +313,12 @@ def validate_lookup_tables(lookup_tables: Dict[str, List[str]], model: str = "o3
     
     validated_tables = {}
     
-    for column_name, values in lookup_tables.items():
-        # Skip if no values
+    def validate_single_column(column_name: str, values: List[str]) -> tuple[str, List[str]]:
+        """
+        Helper function to validate a single column's lookup table.
+        """
         if not values:
-            continue
+            return column_name, []
             
         # Construct prompt for LLM
         validation_prompt = f"""
@@ -356,15 +362,34 @@ def validate_lookup_tables(lookup_tables: Dict[str, List[str]], model: str = "o3
                     f"Reason: {validation_result.get('reasoning')}"
                 )
             
-            # Only keep valid values for the lookup table
-            if validation_result.get("valid_values"):
-                validated_tables[column_name] = validation_result["valid_values"]
+            return column_name, validation_result.get("valid_values", [])
         
         except Exception as e:
             logger.error(f"Error validating lookup table for column '{column_name}': {str(e)}")
             # Fall back to original values if validation fails
-            validated_tables[column_name] = values
-            
+            return column_name, values
+
+    # Use ThreadPoolExecutor for parallel validation
+    max_workers = min(len(lookup_tables), os.cpu_count() * 2 or 4)  # Dynamic worker count
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        # Submit validation tasks for each column
+        future_to_column = {
+            executor.submit(validate_single_column, col, values): col
+            for col, values in lookup_tables.items()
+        }
+        
+        # Collect results as they complete
+        for future in as_completed(future_to_column):
+            column_name = future_to_column[future]
+            try:
+                col, valid_values = future.result()
+                if valid_values:  # Only add if there are valid values
+                    validated_tables[col] = valid_values
+            except Exception as e:
+                logger.error(f"Error processing column '{column_name}' in parallel: {str(e)}")
+                # Fall back to original values
+                validated_tables[column_name] = lookup_tables[column_name]
+    
     return validated_tables
 
 def generate_dq_rules(data: str, column_info: dict, lookup_tables: Optional[Dict[str, List[str]]] = None, model: str = "o3-mini"):
@@ -435,7 +460,6 @@ def generate_dq_rules(data: str, column_info: dict, lookup_tables: Optional[Dict
                 {"role": "system", "content": "You are a data quality expert generating comprehensive DQ rules."},
                 {"role": "user", "content": base_prompt}
             ],
-        
             response_format={"type": "json_object"}
         )
 
